@@ -1,0 +1,14 @@
+torch~=2.5.0
+torch_xla[tpu]~=2.5.0
+torchvision
+faster-coco-eval
+pycocotools
+torchmetrics[detection]
+torchinfo
+albumentations
+matplotlib
+tensorboard
+pycocotools
+imageio 
+imageio-ffmpeg
+av
