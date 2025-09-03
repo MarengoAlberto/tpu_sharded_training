@@ -1,14 +1,18 @@
 import argparse
 import pprint
 import math
+import os
+
 import torch
 import torch.optim as optim
+import torch_xla.runtime as xr
 import torch_xla.core.xla_model as xm
 import torch_xla.distributed.xla_multiprocessing as xmp
 import torch_xla.distributed.parallel_loader as pl
-from torch_xla.distributed.fsdp import XlaFullyShardedDataParallel as FSDP
 from torchinfo import summary
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
+
+
 
 from config import Config
 from src.data import PlateDataset, DataEncoder
@@ -20,24 +24,13 @@ from src.train_utils import build_cosine_warmup, make_param_groups
 from src.train import fit
 from src.loss import OHEMLoss, SmoothL1Loss, FocalLoss, IoULoss
 from src.tensorboard import TensorBoardVisualizer
+from src.distributed_utils import apply_fsdp_with_ckpt_detector
 
 
-def fsdp_wrap(module, cfg, device):
-    if cfg.run_without_fsdp:
-        return module.to(device)
-    # note: to implement ZeRO-3, set `cfg.reshard_after_forward` to True
-    # FSDP can directly wrap a module on CPU in https://github.com/pytorch/xla/pull/3992
-    # so one doesn't need to cast the module into XLA devices first.
-    return FSDP(
-        module if cfg.shard_on_cpu else module.to(device),
-        reshard_after_forward=cfg.reshard_after_forward,
-        flatten_parameters=cfg.flatten_parameters,
-    )
 
+def build_datasets(cfg, rank, device):
 
-def build_datasets(cfg, device):
     world_size = xm.xrt_world_size()
-    rank = xm.get_ordinal()
 
     assert cfg.batch_size % world_size == 0
     local_batch_size = cfg.batch_size // world_size
@@ -118,29 +111,33 @@ def build_od_model(cfg, device):
     with torch.no_grad():
         model.cls_head.head[-1].bias.fill_(prior_bias)
 
-    model = fsdp_wrap(model, cfg, device)
+    model.to(device)
+    model = apply_fsdp_with_ckpt_detector(model, use_conv_auto_wrap=True)
+    return model
 
     xm.master_print(summary(model, input_size=(1,) + cfg.IMG_SIZE[::-1], row_settings=["var_names"]))
 
     return model
 
 
-def train(cfg):
-    set_seeds()
-    batch_size = cfg.batch_size
-    num_epochs = cfg.num_epochs
+def main_worker(rank, cfg):
+    if cfg.BACKEND:
+        os.environ["PJRT_DEVICE"] = "CPU" if cfg.BACKEND.lower() == "cpu" else "TPU"
+
+    set_seeds(123 + rank)
     device = xm.xla_device()
-    rank = xm.get_local_ordinal()
+
+    if cfg.xla_cache:
+        xr.initialize_cache(cfg.xla_cache, readonly=False)
 
     # build datasets
     data_encoder = DataEncoder(input_size=cfg.IMG_SIZE[:2], classes=cfg.CLASSES)
-    train_dataset, train_loader, train_sampler, _, val_loader, _ = build_datasets(cfg, device)
+    train_dataset, train_loader, train_sampler, _, val_loader, _ = build_datasets(cfg, rank, device)
     xm.rendezvous("loaded dataset")
     xm.master_print(f"\n=== dataset ===\n{pprint.pformat(train_dataset)}\n")
 
     # build model and loss
     model = build_od_model(cfg, device)
-    loss_fn = torch.nn.CrossEntropyLoss()
     xm.rendezvous("loaded model")
     xm.master_print(f"\n=== model ===\n{pprint.pformat(model)}\n")
 
@@ -199,11 +196,15 @@ def train(cfg):
     )
 
 
-def main(device_id, cfg):
-    cfg, current_version_name = setup_log_directory(cfg)
-    xm.master_print(f"\n=== cfg ===\n{pprint.pformat(cfg)}\n")
-    train(cfg)
-    xm.master_print("training completed")
+def run(args):
+    # Force single process on CPU debug (PJRT CPU doesn’t simulate multiple devices)
+    if args.backend.lower() == "cpu":
+        args.world_size = 1
+
+    if args.world_size <= 1:
+        main_worker(0, args)
+    else:
+        xmp.spawn(main_worker, args=(args,), nprocs=args.world_size)
 
 
 if __name__ == "__main__":
@@ -244,4 +245,4 @@ if __name__ == "__main__":
 
     # cfg = parser.parse_args()
     cfg = Config()
-    xmp.spawn(main, args=(cfg,))
+    run(cfg)

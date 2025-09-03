@@ -3,6 +3,8 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
+from .distributed_utils import save_fsdp_model
+
 
 def training_step(
         model,
@@ -231,10 +233,13 @@ def fit(
         current_acc = output_test["metrics"]["map"].numpy()
 
         if current_acc >= best_acc:
-            torch.save(
-                model.state_dict(),
-                os.path.join(checkpoint_dir, model.__class__.__name__) + '_best.pth'
-            )
+            if device == "TPU":
+                save_fsdp_model(model, os.path.join(checkpoint_dir, model.__class__.__name__))
+            else:
+                torch.save(
+                    model.state_dict(),
+                    os.path.join(checkpoint_dir, model.__class__.__name__) + '_best.pth'
+                )
 
     return history
 

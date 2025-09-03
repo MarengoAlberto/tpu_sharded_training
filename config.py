@@ -8,7 +8,7 @@ class Config:
     IMG_SIZE: Iterable[int] = (512, 512, 3)
     EPOCHS: int = 100
     DEBUG_MODE: bool = True
-    DEVICE: str = "cuda"
+    BACKEND: str = "cpu"
 
     BACKBONE_MODEL = "resnet101" # resnet18, resnet50
     FPN_CHANNELS: int = 128 # Number of output channels from the FPN.
@@ -56,12 +56,3 @@ class Config:
     
     # Minimum LR ratio if cosine decay is applied
     MIN_LR_RATIO: float = 0.01
-
-    RUN_WITHOUT_SFPD: bool = False
-
-    SHARD_ON_CPU: bool = False
-
-    FLATTEN_PARAMETERS: bool = False
-
-    NO_RESHARD_AFTER_FORWARD: bool = True
-
