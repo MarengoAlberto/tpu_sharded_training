@@ -3,7 +3,10 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-from .distributed_utils import save_fsdp_model
+try:
+    from .distributed_utils import save_fsdp_model
+except ImportError:
+    pass
 
 
 def training_step(
@@ -36,7 +39,7 @@ def training_step(
         cls_loss = loss_fn["cls_loss"](pred_labels, cls_targets)
         total_loss = loss_weights["loc_wt"]*loc_loss + loss_weights["cls_wt"]*cls_loss
         total_loss.backward()
-        torch.nn.utils.clip_grad_norm_(1.0) #torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         optimizer.zero_grad(set_to_none=True)
 

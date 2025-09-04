@@ -1,5 +1,5 @@
-torch~=2.5.0
-torch_xla[tpu]~=2.5.0
+torch==2.7.*
+torch-xla[tpu]==2.7.* ; sys_platform == "linux" and platform_machine == "x86_64"
 torchvision
 faster-coco-eval
 pycocotools
@@ -11,4 +11,6 @@ tensorboard
 pycocotools
 imageio 
 imageio-ffmpeg
+requests
+tqdm
 av

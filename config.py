@@ -5,10 +5,12 @@ from typing import Iterable
 
 @dataclass
 class Config:
-    IMG_SIZE: Iterable[int] = (512, 512, 3)
-    EPOCHS: int = 100
+    IMG_SIZE: Iterable[int] = (80, 80, 3) #(512, 512, 3)
+    EPOCHS: int = 2
     DEBUG_MODE: bool = True
     BACKEND: str = "cpu"
+    XLA_CACHE: bool = False
+    WORLD_SIZE: int = 1
 
     BACKBONE_MODEL = "resnet101" # resnet18, resnet50
     FPN_CHANNELS: int = 128 # Number of output channels from the FPN.
@@ -34,13 +36,15 @@ class Config:
     log_dir: str = "version_0"
     checkpoint_dir: str = "version_0"
 
-    ROOT_DIR = 'Dataset' # Dataset root directory
+    ROOT_DIR = 'data/Dataset/Dataset' # Dataset root directory
+    CONTAINER_DATA_DIR: str = "/workspace/data"
+    ZIP_URL: str = "https://www.dropbox.com/s/k81ljpmzy3fgtx9/Dataset.zip?dl=1"
     CLASSES: tuple = ("__background__", "Reg-plate")
 
     BATCH_SIZE: int = 16
 
     # Number of workers to use for training
-    NUM_WORKERS: int = 4
+    NUM_WORKERS: int = 1 #4
 
     INIT_LEARING_RATE: float = 5e-4
     MOMENTUM: float = 0.9

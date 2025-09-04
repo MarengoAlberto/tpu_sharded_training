@@ -5,35 +5,44 @@ import os
 
 import torch
 import torch.optim as optim
-import torch_xla.runtime as xr
-import torch_xla.core.xla_model as xm
-import torch_xla.distributed.xla_multiprocessing as xmp
-import torch_xla.distributed.parallel_loader as pl
 from torchinfo import summary
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
+
+try:
+    import torch_xla.runtime as xr
+    import torch_xla.core.xla_model as xm
+    import torch_xla.distributed.xla_multiprocessing as xmp
+    import torch_xla.distributed.parallel_loader as pl
+    from src.distributed_utils import apply_fsdp_with_ckpt_detector
+except Exception:
+    print("Failed to import torch_xla. Please ensure that torch_xla is installed.")
+
 
 
 
 from config import Config
 from src.data import PlateDataset, DataEncoder
 from src.transform import get_augmentations
-from src.utils import set_seeds
+from src.utils import set_seeds, download_and_unzip_zip
 from src.detector import Detector
 from src.logging import setup_log_directory
 from src.train_utils import build_cosine_warmup, make_param_groups
 from src.train import fit
 from src.loss import OHEMLoss, SmoothL1Loss, FocalLoss, IoULoss
 from src.tensorboard import TensorBoardVisualizer
-from src.distributed_utils import apply_fsdp_with_ckpt_detector
+
 
 
 
 def build_datasets(cfg, rank, device):
+    print(f"Building datasets on rank {rank} and device {device}...")
+    if getattr(device, "type", str(device)) == "cpu":
+        world_size = 1
+    else:
+        world_size = xm.xrt_world_size()
 
-    world_size = xm.xrt_world_size()
-
-    assert cfg.batch_size % world_size == 0
-    local_batch_size = cfg.batch_size // world_size
+    assert cfg.BATCH_SIZE % world_size == 0
+    local_batch_size = cfg.BATCH_SIZE // world_size
 
     ROOT_DIR = cfg.ROOT_DIR
     IMG_SIZE = cfg.IMG_SIZE
@@ -71,8 +80,11 @@ def build_datasets(cfg, rank, device):
         num_workers=NUM_WORKERS,
         pin_memory=True,
         persistent_workers=True,
+        collate_fn=train_dataset.collate_fn,
     )
-    train_loader = pl.MpDeviceLoader(train_loader, device)
+
+    if world_size > 1:
+        train_loader = pl.MpDeviceLoader(train_loader, device)
 
     val_sampler = torch.utils.data.distributed.DistributedSampler(
         val_dataset, num_replicas=world_size, rank=rank, drop_last=True, shuffle=False,
@@ -85,8 +97,11 @@ def build_datasets(cfg, rank, device):
         num_workers=NUM_WORKERS,
         pin_memory=True,
         persistent_workers=True,
+        collate_fn=val_dataset.collate_fn,
     )
-    val_loader = pl.MpDeviceLoader(val_loader, device)
+    if world_size > 1:
+        val_loader = pl.MpDeviceLoader(val_loader, device)
+
     return (
         train_dataset,
         train_loader,
@@ -112,49 +127,76 @@ def build_od_model(cfg, device):
         model.cls_head.head[-1].bias.fill_(prior_bias)
 
     model.to(device)
-    model = apply_fsdp_with_ckpt_detector(model, use_conv_auto_wrap=True)
-    return model
 
-    xm.master_print(summary(model, input_size=(1,) + cfg.IMG_SIZE[::-1], row_settings=["var_names"]))
+    if getattr(device, "type", str(device)) == "cpu":
+        print("Loaded model")
+    else:
+        model = apply_fsdp_with_ckpt_detector(model, use_conv_auto_wrap=True)
+        xm.master_print(summary(model, input_size=(1,) + cfg.IMG_SIZE[::-1], row_settings=["var_names"]))
 
     return model
 
 
 def main_worker(rank, cfg):
+
+    download_and_unzip_zip(cfg.ZIP_URL, cfg.CONTAINER_DATA_DIR)
+
+    cfg, current_version_name = setup_log_directory(cfg)
+
     if cfg.BACKEND:
         os.environ["PJRT_DEVICE"] = "CPU" if cfg.BACKEND.lower() == "cpu" else "TPU"
 
-    set_seeds(123 + rank)
-    device = xm.xla_device()
+    set_seeds(rank)
 
-    if cfg.xla_cache:
+    try:
+        device = xm.xla_device()
+        xm.master_print(f"Process {rank} using device: {device}")
+        xm.master_print(f"Current version: {current_version_name} with cfg: {pprint.pformat(cfg)}")
+    except Exception:
+        device = torch.device("cpu")
+        print(f"Process {rank} using device: {device}")
+        print(f"Current version: {current_version_name} with cfg: {pprint.pformat(cfg)}")
+
+    if cfg.XLA_CACHE:
         xr.initialize_cache(cfg.xla_cache, readonly=False)
 
     # build datasets
     data_encoder = DataEncoder(input_size=cfg.IMG_SIZE[:2], classes=cfg.CLASSES)
     train_dataset, train_loader, train_sampler, _, val_loader, _ = build_datasets(cfg, rank, device)
-    xm.rendezvous("loaded dataset")
-    xm.master_print(f"\n=== dataset ===\n{pprint.pformat(train_dataset)}\n")
+    if getattr(device, "type", str(device)) == "cpu":
+        print("loaded dataset")
+    else:
+        xm.rendezvous("loaded dataset")
+        xm.master_print(f"\n=== dataset ===\n{pprint.pformat(train_dataset)}\n")
 
     # build model and loss
     model = build_od_model(cfg, device)
-    xm.rendezvous("loaded model")
-    xm.master_print(f"\n=== model ===\n{pprint.pformat(model)}\n")
+    if getattr(device, "type", str(device)) == "cpu":
+        print("loaded model")
+    else:
+        xm.rendezvous("loaded model")
+        xm.master_print(f"\n=== model ===\n{pprint.pformat(model)}\n")
 
     parameters = list(model.parameters())
-    xm.master_print(f"per-TPU (sharded) parameter num: {sum(p.numel() for p in parameters)}")
+    if getattr(device, "type", str(device)) == "cpu":
+        print("Placeholder")
+    else:
+        xm.master_print(f"per-TPU (sharded) parameter num: {sum(p.numel() for p in parameters)}")
 
     # build optimizer and scheduler
     optimizer = optim.AdamW(
-        make_param_groups(model, wd=cfg.weight_decay),
+        make_param_groups(model, wd=cfg.WEIGHT_DECAY),
         lr=cfg.INIT_LEARING_RATE, betas=(0.9, 0.999), eps=1e-8
     )
 
     lr_scheduler = build_cosine_warmup(optimizer, total_epochs=cfg.EPOCHS, warmup_epochs=1,
                                        min_lr_ratio=cfg.MIN_LR_RATIO)
 
-    xm.rendezvous("loaded optimizer")
-    xm.master_print(f"\n=== optimizer ===\n{pprint.pformat(optimizer)}\n")
+    if getattr(device, "type", str(device)) == "cpu":
+        print("loaded optimizer")
+    else:
+        xm.rendezvous("loaded optimizer")
+        xm.master_print(f"\n=== optimizer ===\n{pprint.pformat(optimizer)}\n")
 
     loss_fn = dict(
         loc_loss=IoULoss(encoded=True, anchors=data_encoder.anchor_boxes),
@@ -172,10 +214,11 @@ def main_worker(rank, cfg):
     # 6. Intialize Visualizer.
     tb_visualizer = TensorBoardVisualizer(logs_dir=cfg.log_dir)
 
-    xm.rendezvous("loaded optimizer")
-    xm.master_print(f"\n=== optimizer ===\n{pprint.pformat(optimizer)}\n")
+    if getattr(device, "type", str(device)) == "cpu":
+        print("training begins")
+    else:
+        xm.rendezvous("training begins")
 
-    xm.rendezvous("training begins")
     training_results = fit(
         model,
         epochs=cfg.EPOCHS,
@@ -198,13 +241,17 @@ def main_worker(rank, cfg):
 
 def run(args):
     # Force single process on CPU debug (PJRT CPU doesn’t simulate multiple devices)
-    if args.backend.lower() == "cpu":
-        args.world_size = 1
+    if args.BACKEND.lower() == "cpu":
+        args.WORLD_SIZE = 1
+        print(f"Running in CPU mode, forcing world_size to {args.WORLD_SIZE}")
+    else:
+        args.WORLD_SIZE = xm.xrt_world_size()
+        print(f"Running in {args.BACKEND} mode with world_size: {args.WORLD_SIZE}")
 
-    if args.world_size <= 1:
+    if args.WORLD_SIZE <= 1:
         main_worker(0, args)
     else:
-        xmp.spawn(main_worker, args=(args,), nprocs=args.world_size)
+        xmp.spawn(main_worker, args=(args,), nprocs=args.WORLD_SIZE)
 
 
 if __name__ == "__main__":

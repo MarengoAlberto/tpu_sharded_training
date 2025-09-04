@@ -1,12 +1,11 @@
 import os
+import requests
+import zipfile
 import random
 import numpy as np
 import torch
 from torchinfo import summary
-import re
-from typing import Callable, List, Dict, Tuple, Optional
 import cv2
-from tqdm.auto import tqdm
 import albumentations as A
 from albumentations.augmentations import Normalize
 from albumentations.pytorch.transforms import ToTensorV2
@@ -15,9 +14,9 @@ from .detector import Detector
 from .data import DataEncoder
 
 
-def set_seeds():
+def set_seeds(rank):
     # fix random seeds
-    SEED_VALUE = 42
+    SEED_VALUE = 42 + rank
 
     random.seed(SEED_VALUE)
     np.random.seed(SEED_VALUE)
@@ -119,3 +118,79 @@ def _predict_plates(model, frame_bgr, encoder, transform, trainer_config):
     pred_bbox[:, 2] = np.minimum(imW, (pred_bbox[:, 2] * ratio_w))
     pred_bbox[:, 3] = np.minimum(imH, (pred_bbox[:, 3] * ratio_h))
     return np.column_stack((pred_bbox, pred_conf))
+
+
+def _direct_download_url(url: str) -> str:
+    # Turn a Dropbox share link into a direct download URL
+    if "dropbox.com" in url and "dl=1" not in url:
+        if "?" in url:
+            return url + "&dl=1"
+        return url + "?dl=1"
+    return url
+
+
+def download_and_unzip_zip(url: str, save_dir: str, zip_name: str | None = None, timeout: int = 60):
+    """
+    Download a ZIP from `url` into `save_dir` and unzip it.
+    Skips work if extracted folder already exists.
+    Validates the downloaded file is a real ZIP.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    url = _direct_download_url(url)
+
+    if zip_name is None:
+        zip_name = os.path.basename(url.split("?")[0]) or "dataset.zip"
+
+    zip_path = os.path.join(save_dir, zip_name)
+    extract_dir = os.path.splitext(zip_path)[0]
+
+    # If already extracted, nothing to do
+    if os.path.isdir(extract_dir) and os.listdir(extract_dir):
+        print(f"✅ Already extracted: {extract_dir}")
+        return extract_dir
+
+    # (Re)download if file missing or not a valid zip
+    need_download = True
+    if os.path.exists(zip_path):
+        # Quick validity check
+        try:
+            with open(zip_path, "rb") as f:
+                magic = f.read(4)
+            if magic == b"PK\x03\x04" and zipfile.is_zipfile(zip_path):
+                need_download = False
+            else:
+                print("⚠️ Existing file is not a valid ZIP. Re-downloading...")
+        except Exception:
+            print("⚠️ Could not read existing file. Re-downloading...")
+
+    if need_download:
+        tmp_path = zip_path + ".partial"
+        # clean up any partial
+        try: os.remove(tmp_path)
+        except FileNotFoundError: pass
+
+        print(f"⬇️  Downloading: {url}")
+        with requests.get(url, stream=True, timeout=timeout) as r:
+            r.raise_for_status()
+            with open(tmp_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=1 << 20):  # 1MB chunks
+                    if chunk:
+                        f.write(chunk)
+        os.replace(tmp_path, zip_path)
+        print(f"✅ Downloaded to: {zip_path}")
+
+        # Validate ZIP after download
+        with open(zip_path, "rb") as f:
+            if f.read(4) != b"PK\x03\x04" or not zipfile.is_zipfile(zip_path):
+                raise ValueError(
+                    "Downloaded file is not a valid ZIP. "
+                    "If this is a Dropbox/Drive link, ensure it's a direct download (e.g., ?dl=1)."
+                )
+
+    # Unzip
+    print(f"📂 Extracting to: {extract_dir}")
+    os.makedirs(extract_dir, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(extract_dir)
+    print("✅ Extraction complete")
+    return extract_dir
