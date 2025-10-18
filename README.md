@@ -38,7 +38,11 @@ gcloud compute tpus tpu-vm ssh $TPU_NAME --zone=$ZONE --command \
      -f https://storage.googleapis.com/libtpu-releases/index.html"
 
 # clone your code and install deps
-gcloud compute tpus tpu-vm ssh $TPU_NAME --zone=$ZONE --command \
+gcloud compute tpus tpu-vm ssh $TPU_NAME --zone=$ZONE --worker=all --command \
 "git clone https://github.com/MarengoAlberto/tpu_sharded_training.git ~/proj && \
  cd ~/proj && pip install -r requirements.txt"
+ 
+ gcloud compute tpus tpu-vm ssh $TPU_NAME \
+  --zone=$ZONE --worker=all --project=$PROJECT_ID --command \
+"cd ~/proj && PJRT_DEVICE=TPU XLA_USE_BF16=1 python3 -m main"
 ```

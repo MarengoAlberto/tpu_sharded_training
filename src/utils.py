@@ -5,7 +5,7 @@ import random
 import numpy as np
 import torch
 from torchinfo import summary
-import cv2
+from typing import Union
 import albumentations as A
 from albumentations.augmentations import Normalize
 from albumentations.pytorch.transforms import ToTensorV2
@@ -129,7 +129,7 @@ def _direct_download_url(url: str) -> str:
     return url
 
 
-def download_and_unzip_zip(url: str, save_dir: str, zip_name: str | None = None, timeout: int = 60):
+def download_and_unzip_zip(url: str, save_dir: str, zip_name: Union[str, None] = None, timeout: int = 60):
     """
     Download a ZIP from `url` into `save_dir` and unzip it.
     Skips work if extracted folder already exists.
