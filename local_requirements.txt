@@ -1,3 +1,0 @@
-torch==2.7.*
-torch-xla[tpu]==2.7.* ; sys_platform == "linux" and platform_machine == "x86_64"
-torchvision

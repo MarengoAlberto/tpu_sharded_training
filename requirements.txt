@@ -1,3 +1,6 @@
+torch==2.8.*
+torch-xla[tpu]==2.8.* ; sys_platform == "linux" and platform_machine == "x86_64"
+torchvision
 faster-coco-eval
 pycocotools
 torchmetrics[detection]
