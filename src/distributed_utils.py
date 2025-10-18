@@ -42,13 +42,13 @@ try:
         if hasattr(model, "fpn"):
             model.fpn = fsdp_wrap(grad_ckpt_wrap(model.fpn), **fsdp_kwargs)
         if hasattr(model, "embedding_1"):
-            model.emb1 = fsdp_wrap(grad_ckpt_wrap(model.emb1), **fsdp_kwargs)
+            model.embedding_1 = fsdp_wrap(grad_ckpt_wrap(model.embedding_1), **fsdp_kwargs)
         if hasattr(model, "embedding_2"):
-            model.emb2 = fsdp_wrap(grad_ckpt_wrap(model.emb2), **fsdp_kwargs)
+            model.embedding_2 = fsdp_wrap(grad_ckpt_wrap(model.embedding_2), **fsdp_kwargs)
         if hasattr(model, "loc_head"):
-            model.head1 = fsdp_wrap(grad_ckpt_wrap(model.head1), **fsdp_kwargs)
+            model.loc_head = fsdp_wrap(grad_ckpt_wrap(model.loc_head), **fsdp_kwargs)
         if hasattr(model, "cls_head"):
-            model.head2 = fsdp_wrap(grad_ckpt_wrap(model.head2), **fsdp_kwargs)
+            model.cls_head = fsdp_wrap(grad_ckpt_wrap(model.cls_head), **fsdp_kwargs)
 
         # Finally, outer wrap the full model. You can also pass auto_wrap_policy so inner modules get auto-wrapped too.
         model = fsdp_wrap(
