@@ -132,7 +132,24 @@ def build_od_model(cfg, device):
         print("Loaded model")
     else:
         model = apply_fsdp_with_ckpt_detector(model)
-        xm.master_print(summary(model, input_size=(1,) + cfg.IMG_SIZE[::-1], row_settings=["var_names"]))
+
+        model.eval()  # safer for summary
+
+        device = next(model.parameters()).device
+
+        # Adjust these to your model:
+        H, W, C = cfg.IMG_SIZE
+
+        x = torch.randn(1, C, H, W, device=device)
+
+        # If your forward takes multiple inputs, pass a tuple/list, e.g. input_data=(x, y)
+        xm.master_print(summary(
+            model,
+            input_data=x,
+            row_settings=["var_names"],
+            col_names=["input_size", "output_size", "num_params", "trainable"],
+            verbose=0,  # optional: quieter logs
+        ))
 
     return model
 
