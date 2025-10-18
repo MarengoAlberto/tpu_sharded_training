@@ -262,8 +262,9 @@ def run(args):
         args.WORLD_SIZE = 1
         print(f"Running in CPU mode, forcing world_size to {args.WORLD_SIZE}")
     else:
-        args.WORLD_SIZE = len(xm.get_xla_supported_devices())
+        args.WORLD_SIZE = 8
         print(f"Running in {args.BACKEND} mode with world_size: {args.WORLD_SIZE}")
+        print(os.environ)
 
     if args.WORLD_SIZE <= 1:
         main_worker(0, args)
