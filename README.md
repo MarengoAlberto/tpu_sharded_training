@@ -75,6 +75,14 @@ git clone https://github.com/MarengoAlberto/tpu_sharded_training.git ~/proj
 cd ~/proj 
 $PIP install -r requirements.txt
 '
+
+ gcloud compute tpus tpu-vm ssh "$TPU_NAME" --zone="$ZONE" --worker=all --command '
+set -e
+PY=~/.pyenv/versions/py312/bin/python
+PIP=~/.pyenv/versions/py312/bin/pip
+cd ~/proj 
+git pull
+'
  
 # gcloud compute tpus tpu-vm ssh $TPU_NAME \
 #  --zone=$ZONE --worker=all --project=$PROJECT_ID --command \
@@ -104,6 +112,7 @@ print("XLA devices:", xm.get_xla_supported_devices())
 PYCODE
 '
 
+# RUN your training script
 gcloud compute tpus tpu-vm ssh "$TPU_NAME" --zone="$ZONE" --command '
 set -e
 PY=~/.pyenv/versions/py312/bin/python
