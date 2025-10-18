@@ -6,9 +6,9 @@ from typing import Iterable
 @dataclass
 class Config:
     IMG_SIZE: Iterable[int] = (80, 80, 3) #(512, 512, 3)
-    EPOCHS: int = 2
-    DEBUG_MODE: bool = True
-    BACKEND: str = "cpu"
+    EPOCHS: int = 100
+    DEBUG_MODE: bool = False
+    BACKEND: str = "tpu"
     XLA_CACHE: bool = False
     WORLD_SIZE: int = 1
 
