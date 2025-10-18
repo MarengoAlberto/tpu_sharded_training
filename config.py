@@ -37,7 +37,7 @@ class Config:
     checkpoint_dir: str = "version_0"
 
     ROOT_DIR = 'data/Dataset/Dataset' # Dataset root directory
-    CONTAINER_DATA_DIR: str = "/data" "/workspace/data"
+    CONTAINER_DATA_DIR: str = "data" #"/workspace/data"
     ZIP_URL: str = "https://www.dropbox.com/s/k81ljpmzy3fgtx9/Dataset.zip?dl=1"
     CLASSES: tuple = ("__background__", "Reg-plate")
 
