@@ -39,7 +39,7 @@ def build_datasets(cfg, rank, device):
     if getattr(device, "type", str(device)) == "cpu":
         world_size = 1
     else:
-        world_size = xr.world_size()
+        world_size = len(xm.get_xla_supported_devices())
 
     assert cfg.BATCH_SIZE % world_size == 0
     local_batch_size = cfg.BATCH_SIZE // world_size
@@ -262,7 +262,7 @@ def run(args):
         args.WORLD_SIZE = 1
         print(f"Running in CPU mode, forcing world_size to {args.WORLD_SIZE}")
     else:
-        args.WORLD_SIZE = xr.world_size()
+        args.WORLD_SIZE = len(xm.get_xla_supported_devices())
         print(f"Running in {args.BACKEND} mode with world_size: {args.WORLD_SIZE}")
 
     if args.WORLD_SIZE <= 1:
