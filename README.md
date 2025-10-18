@@ -45,7 +45,7 @@ pyenv activate py312
 python -V
 pip install -U pip wheel setuptools
 # Install matching torch/XLA (2.8) + libtpu
-pip install "torch==2.8.*" "torch_xla==2.8.*" \
+pip install "torch==2.8.*" "torch_xla==2.8.*" "torchvision" \
   -f https://storage.googleapis.com/libtpu-releases/index.html
 python - <<PY
 import torch, torch_xla; from torch_xla.core import xla_model as xm
@@ -90,26 +90,28 @@ git pull
 
 # Check the right versions of torch and torch_xla are installed
 gcloud compute tpus tpu-vm ssh "$TPU_NAME" --zone="$ZONE" --worker=all --command '
-set -euo pipefail
-PY="$HOME/.pyenv/versions/py312/bin/python"   # your pyenv 3.12 interpreter
-echo "Using:" $PY; $PY -V
+set -e
+PY="$HOME/.pyenv/versions/py312/bin/python"
 
-# 1) Clean any mismatched installs (important!)
-$PY -m pip uninstall -y torch torch-xla torchvision torchaudio torchtext || true
+echo "== Clean =="
+$PY -m pip uninstall -y torch torch-xla libtpu torchvision torchaudio torchtext || true
 
-# 2) Install matching Torch/XLA **2.8** for Python 3.12 (from TPU wheel index)
+echo "== Install matching Torch/XLA 2.8 and let XLA pull libtpu =="
 $PY -m pip install -U pip wheel setuptools
-$PY -m pip install "torch==2.8.*" "torchvision" "torch_xla==2.8.*" \
+$PY -m pip install --no-cache-dir \
+  "torch==2.8.*" "torch_xla[tpu]==2.8.*" "torchvision" \
   -f https://storage.googleapis.com/libtpu-releases/index.html
 
-# 3) Verify import + device visibility
-$PY - << "PYCODE"
+echo "== Verify =="
+PJRT_DEVICE=TPU $PY - << "PY"
 import inspect, torch, torch_xla
 from torch_xla.core import xla_model as xm
-print("torch     :", torch.__version__)
-print("torch_xla :", torch_xla.__version__, " at:", inspect.getfile(torch_xla))
+import pkg_resources
+print("torch      :", torch.__version__)
+print("torch_xla  :", torch_xla.__version__, "at", inspect.getfile(torch_xla))
+print("libtpu ver :", next((str(d.version) for d in pkg_resources.working_set if d.project_name=="libtpu"), "not found"))
 print("XLA devices:", xm.get_xla_supported_devices())
-PYCODE
+PY
 '
 
 # RUN your training script
