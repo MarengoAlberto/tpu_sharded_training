@@ -268,7 +268,7 @@ def run(args):
     if args.WORLD_SIZE <= 1:
         main_worker(0, args)
     else:
-        xmp.spawn(main_worker, args=(args,), nprocs=args.WORLD_SIZE)
+        xmp.spawn(main_worker, args=(args,), nprocs=None)
 
 
 if __name__ == "__main__":
