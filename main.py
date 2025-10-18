@@ -39,7 +39,8 @@ def build_datasets(cfg, rank, device):
     if getattr(device, "type", str(device)) == "cpu":
         world_size = 1
     else:
-        world_size = len(xm.get_xla_supported_devices())
+        world_size = cfg.WORLD_SIZE
+        print(f"Dataset -- > world_size: {world_size}")
 
     assert cfg.BATCH_SIZE % world_size == 0
     local_batch_size = cfg.BATCH_SIZE // world_size
