@@ -131,7 +131,7 @@ def build_od_model(cfg, device):
     if getattr(device, "type", str(device)) == "cpu":
         print("Loaded model")
     else:
-        model = apply_fsdp_with_ckpt_detector(model, use_conv_auto_wrap=True)
+        model = apply_fsdp_with_ckpt_detector(model)
         xm.master_print(summary(model, input_size=(1,) + cfg.IMG_SIZE[::-1], row_settings=["var_names"]))
 
     return model
