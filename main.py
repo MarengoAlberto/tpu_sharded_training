@@ -8,12 +8,14 @@ import torch.optim as optim
 from torchinfo import summary
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
 
+is_xla = False
 try:
     import torch_xla.runtime as xr
     import torch_xla.core.xla_model as xm
     import torch_xla.distributed.xla_multiprocessing as xmp
     import torch_xla.distributed.parallel_loader as pl
     from src.distributed_utils import apply_fsdp_with_ckpt_detector
+    is_xla = True
 except Exception:
     print("Failed to import torch_xla. Please ensure that torch_xla is installed.")
 
@@ -35,7 +37,6 @@ from src.tensorboard import TensorBoardVisualizer
 
 def build_datasets(cfg, rank, device):
     print(f"Building datasets on rank {rank} and device {device}...")
-    is_xla = getattr(device, "type", str(device)).lower() == "xla"
     world_size = len(xm.get_xla_supported_devices())
 
     assert cfg.BATCH_SIZE % world_size == 0
@@ -266,7 +267,7 @@ def run(args):
     #     print(f"Running in {args.BACKEND} mode with world_size: {args.WORLD_SIZE}")
     #     print(os.environ)
 
-    if args.WORLD_SIZE <= 1:
+    if not is_xla:
         main_worker(0, args)
     else:
         xmp.spawn(main_worker, args=(args,), nprocs=None)
