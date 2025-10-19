@@ -78,6 +78,11 @@ class PlateDataset(Dataset):
         # Generate Encoded bounding boxes and labels
         # ===========================================================
 
+        if len(transformed_boxes) == 0:
+            # let encoder produce background-only targets
+            transformed_boxes = torch.zeros((0, 4), dtype=torch.float32)
+            transformed_labels = torch.zeros((0,), dtype=torch.int64)
+
         loc_target, cls_target = self.encoder.encode(transformed_boxes, transformed_labels)
 
         return transformed_img, transformed_boxes, transformed_labels, loc_target, cls_target

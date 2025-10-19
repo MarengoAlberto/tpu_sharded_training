@@ -9,12 +9,10 @@ if os.getenv("PJRT_DEVICE", "CPU") == "TPU":
 else:
     is_xla = False
 
-
 def _base_loader_len(loader):
     # If wrapped by MpDeviceLoader, the real DataLoader is in .loader
     base = getattr(loader, "loader", loader)
     return len(base)
-
 
 def set_sampler_epoch(loader, epoch):
     sampler = getattr(loader, "sampler", None)
@@ -27,6 +25,8 @@ def set_sampler_epoch(loader, epoch):
 def _probe(msg, xm):
     print(f"[rank {xm.get_local_ordinal()}] {msg}", flush=True)
 
+def _safe_mean(xs, default=np.nan):
+    return float(np.mean(xs)) if len(xs) else default
 
 def training_step(
         model,
@@ -89,11 +89,9 @@ def training_step(
         # with ctx:
         pred_boxes, pred_labels = model(image_batch)
 
-        # loc_loss = loss_fn["loc_loss"](pred_boxes.float(), box_targets, cls_targets)
-        # cls_loss = loss_fn["cls_loss"](pred_labels.float(), cls_targets)
-        # total_loss = loss_weights["loc_wt"]*loc_loss + loss_weights["cls_wt"]*cls_loss
-
-        total_loss = pred_boxes.float().sum() * 0.0 + pred_labels.float().sum() * 0.0
+        loc_loss = loss_fn["loc_loss"](pred_boxes.float(), box_targets, cls_targets)
+        cls_loss = loss_fn["cls_loss"](pred_labels.float(), cls_targets)
+        total_loss = loss_weights["loc_wt"]*loc_loss + loss_weights["cls_wt"]*cls_loss
 
         if is_xla:
             xm.mark_step()
@@ -113,12 +111,12 @@ def training_step(
 
         optimizer_lr = optimizer.param_groups[0]["lr"]
 
-        # cls_loss_avg.append(cls_loss.item())
-        # loc_loss_avg.append(loc_loss.item())
+        cls_loss_avg.append(cls_loss.item())
+        loc_loss_avg.append(loc_loss.item())
         total_loss_avg.append(total_loss.item())
 
-        status = f"{prefix}[Train][{i}] Total Loss: {np.mean(total_loss_avg):.4f}, "
-        status+= f"Loc Loss: {np.mean(loc_loss_avg):.4f}, Cls Loss: {np.mean(cls_loss_avg):.4f}, "
+        status = f"{prefix}[Train][{i}] Total Loss: {_safe_mean(total_loss_avg):.4f}, "
+        status+= f"Loc Loss: {_safe_mean(loc_loss_avg):.4f}, Cls Loss: {_safe_mean(cls_loss_avg):.4f}, "
         status+= f"LR: {optimizer_lr:.3f}"
 
         if is_master:
