@@ -179,7 +179,8 @@ def main_worker(rank, cfg):
         xla_topology_banner("setup")
         xm.master_print(f"Process {rank} using device: {device}")
         xm.master_print(f"Current version: {current_version_name} with cfg: {pprint.pformat(cfg)}")
-    except Exception:
+    except Exception as e:
+        print(f"Could not initialize XLA device, defaulting to CPU. Exception: {e}")
         device = torch.device("cpu")
         print(f"Process {rank} using device: {device}")
         print(f"Current version: {current_version_name} with cfg: {pprint.pformat(cfg)}")
