@@ -159,7 +159,7 @@ def main_worker(rank, world, cfg):
 
     set_seeds(rank)
 
-    try:
+    if is_xla:
         import torch_xla.core.xla_model as xm
         import torch_xla.runtime as xr
 
@@ -171,7 +171,7 @@ def main_worker(rank, world, cfg):
 
         print(f"[child] rank={rank}/{world} local_ordinal={local_ord} device={device}", flush=True)
 
-    except Exception as e:
+    else:
         print(f"Could not initialize XLA device, defaulting to CPU. Exception: {e}")
         device = torch.device("cpu")
         print(f"Process {rank} using device: {device}")
