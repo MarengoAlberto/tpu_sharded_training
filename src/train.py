@@ -1,4 +1,5 @@
 import os
+import copy
 import numpy as np
 import torch
 from tqdm.auto import tqdm as tqdm_auto
@@ -22,7 +23,7 @@ def training_step(
 ):
 
     try:
-        device_loader = pl.MpDeviceLoader(loader, device)
+        device_loader = loader
         is_master = xm.is_master_ordinal()  # only one process prints
         pbar = None
         if is_master:
@@ -107,7 +108,7 @@ def validation_step(
 ):
 
     try:
-        device_loader = pl.MpDeviceLoader(loader, device)
+        device_loader = loader
         is_master = xm.is_master_ordinal()  # only one process prints
         pbar = None
         if is_master:

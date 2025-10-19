@@ -123,4 +123,39 @@ cd ~/proj
 PJRT_DEVICE=TPU PYTHONUNBUFFERED=1 XLA_USE_BF16=1 \
   $PY -m main
 '
+
+
+# KILL any stuck TPU training jobs
+# 1) Create the killer script on the TPU VM
+gcloud compute tpus tpu-vm ssh "$TPU_NAME" --zone="$ZONE" --command '
+cat << "EOF" | sudo tee /tmp/kill_tpu_jobs.sh >/dev/null
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "[*] Listing candidate processes..."
+ps -ef | egrep -i "torchrun|xla_spawn|xmp\.spawn|ipykernel|jupyter-(notebook|lab)|python" | grep -v egrep || true
+
+echo "[*] Sending TERM..."
+sudo pkill -f "torchrun|xla_spawn|xmp\.spawn|ipykernel|jupyter-(notebook|lab)|python.*(main|train)\.py" || true
+
+sleep 2
+
+echo "[*] Sending KILL (brutal)..."
+sudo pkill -9 -f "torchrun|xla_spawn|xmp\.spawn" || true
+sudo pkill -9 -f "python(3)?(\s|$)" || true
+
+echo "[*] Freeing common rendezvous port 29500..."
+sudo fuser -k 29500/tcp 2>/dev/null || true
+
+echo "[*] Remaining offenders (if any):"
+pgrep -fa "python|torchrun|xla_spawn|xmp\.spawn" || echo "✅ All TPU training processes killed."
+EOF
+sudo chmod +x /tmp/kill_tpu_jobs.sh
+'
+
+# 2) Run it (single host)
+gcloud compute tpus tpu-vm ssh "$TPU_NAME" --zone="$ZONE" --command 'sudo /tmp/kill_tpu_jobs.sh'
+
+
+
 ```
