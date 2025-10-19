@@ -172,7 +172,6 @@ def main_worker(rank, world, cfg):
         print(f"[child] rank={rank}/{world} local_ordinal={local_ord} device={device}", flush=True)
 
     else:
-        print(f"Could not initialize XLA device, defaulting to CPU. Exception: {e}")
         device = torch.device("cpu")
         print(f"Process {rank} using device: {device}")
         print(f"Current version: {current_version_name} with cfg: {pprint.pformat(cfg)}")
