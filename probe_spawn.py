@@ -1,55 +1,51 @@
-# probe_spawn_v3.py
-import os, time, contextlib
+import os, sys, time
+
+# Keep logs tidy
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "1")
 os.environ.setdefault("GRPC_VERBOSITY", "ERROR")
 
-try:
-    import torch_xla.runtime as xr
-    XLA_OK = True
-except Exception as e:
-    print(f"[parent] torch_xla.runtime not available: {e}", flush=True)
-    XLA_OK = False
-
-
-def child_worker(rank: int, world: int):
+def child(rank: int, world: int):
     import torch
     import torch_xla.core.xla_model as xm
-    from torch_xla.debug import metrics as met
 
     dev = xm.xla_device()
-    with contextlib.suppress(Exception):
+    try:
         local_ord = xm.get_local_ordinal()
+    except Exception:
+        local_ord = -1
 
-    print(f"[child] rank={rank}/{world} local_ordinal={local_ord} default_device={dev} PJRT_DEVICE={xr.device_type()}",
-          flush=True)
-    xm.rendezvous("after_setup")
+    print(f"[child] rank={rank}/{world} local_ordinal={local_ord} device={dev}", flush=True)
 
-    # Trigger a tiny compile (now with grad)
+    # Trigger a tiny compile & a real device step
     x = torch.randn(4, 4, device=dev, requires_grad=True)
-    t0 = time.perf_counter()
-    y = (x @ x) + 1.0
-    y.sum().backward()
+    y = (x @ x).sum()
+    y.backward()
     xm.mark_step()
-    dt = time.perf_counter() - t0
-    print(f"[child] rank={rank} first_step_compile_dt={dt:.2f}s", flush=True)
+    print(f"[child] rank={rank} first_step_done", flush=True)
 
-    if xm.is_master_ordinal():
-        print(met.metrics_report(fmt="text", shorten=True), flush=True)
+    # Make sure all device work is flushed before exit
+    try:
+        xm.wait_device_ops()
+    except Exception:
+        pass
 
-    xm.rendezvous("done")
-
+    # No barriers, no extra threads; exit promptly
+    sys.stdout.flush()
+    return  # child returns; parent join will complete
 
 def main():
-    if not XLA_OK:
-        print("[parent] XLA not available; exiting.", flush=True)
-        return
+    try:
+        import torch_xla.runtime as xr
+        import torch_xla.distributed.xla_multiprocessing as xmp
+    except Exception as e:
+        print(f"[parent] XLA not available: {e}", flush=True)
+        sys.exit(1)
 
     world = int(os.environ.get("TPU_NUM_DEVICES", "0")) or 8
     print(f"[parent] PJRT_DEVICE={xr.device_type()} planned_world={world}", flush=True)
 
-    import torch_xla.distributed.xla_multiprocessing as xmp
-    xmp.spawn(child_worker, args=(world,), nprocs=None)
-
+    # Important: nprocs=None, limit via TPU_NUM_DEVICES
+    xmp.spawn(child, args=(world,), nprocs=None)
 
 if __name__ == "__main__":
     main()
