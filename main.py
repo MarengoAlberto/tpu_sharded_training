@@ -34,7 +34,7 @@ from src.tensorboard import TensorBoardVisualizer
 
 def xla_topology_banner(tag="init"):
     devs = xm.get_xla_supported_devices()   # e.g., ['TPU:0', 'TPU:1', ...]
-    world = xm.xla_world_size()
+    world = len(devs)
     rank = xm.get_ordinal()
     lrank = xm.get_local_ordinal()
     xm.master_print(
