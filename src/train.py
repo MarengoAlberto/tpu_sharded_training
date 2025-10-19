@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import torch
+import contextlib
 from tqdm.auto import tqdm as tqdm_auto
 
 if os.getenv("PJRT_DEVICE", "CPU") == "TPU":
@@ -57,6 +58,14 @@ def training_step(
     total_loss_avg = []
 
     for i, batch_sample in enumerate(device_loader):
+
+        if i == 0 and is_xla:
+            try:
+                rank = xm.get_ordinal()
+            except Exception:
+                rank = -1
+            print(f"[rank {rank}] reached first batch — compiling...", flush=True)
+
         optimizer.zero_grad()
         if is_xla:
             image_batch = torch.stack(batch_sample[0])
@@ -67,18 +76,24 @@ def training_step(
             box_targets = torch.stack(batch_sample[3]).to(device)
             cls_targets = torch.stack(batch_sample[4]).to(device)
 
-        pred_boxes, pred_labels = model(image_batch)
+        ctx = torch.autocast("xla", dtype=torch.bfloat16) if is_xla else contextlib.nullcontext()
+        with ctx:
+            pred_boxes, pred_labels = model(image_batch)
 
-        loc_loss = loss_fn["loc_loss"](pred_boxes, box_targets, cls_targets)
-        cls_loss = loss_fn["cls_loss"](pred_labels, cls_targets)
-        total_loss = loss_weights["loc_wt"]*loc_loss + loss_weights["cls_wt"]*cls_loss
-        total_loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            loc_loss = loss_fn["loc_loss"](pred_boxes, box_targets, cls_targets)
+            cls_loss = loss_fn["cls_loss"](pred_labels, cls_targets)
+            total_loss = loss_weights["loc_wt"]*loc_loss + loss_weights["cls_wt"]*cls_loss
+
         if is_xla:
-            xm.optimizer_step(optimizer)
-            optimizer.zero_grad(set_to_none=True)
+            xm.mark_step()
+
+        total_loss.backward()
+
+        if is_xla:
+            xm.optimizer_step(optimizer, barrier=True)
             xm.mark_step()
         else:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
 
@@ -159,11 +174,13 @@ def validation_step(
             cls_targets = torch.stack(batch_sample[4]).to(device)
 
         with torch.no_grad():
-            pred_boxes, pred_labels = model(image_batch)
+            ctx = torch.autocast("xla", dtype=torch.bfloat16) if is_xla else contextlib.nullcontext()
+            with ctx:
+                pred_boxes, pred_labels = model(image_batch)
 
-        loc_loss = loss_fn["loc_loss"](pred_boxes, box_targets, cls_targets)
-        cls_loss = loss_fn["cls_loss"](pred_labels, cls_targets)
-        total_loss = loss_weights["loc_wt"]*loc_loss + loss_weights["cls_wt"]*cls_loss
+                loc_loss = loss_fn["loc_loss"](pred_boxes, box_targets, cls_targets)
+                cls_loss = loss_fn["cls_loss"](pred_labels, cls_targets)
+                total_loss = loss_weights["loc_wt"]*loc_loss + loss_weights["cls_wt"]*cls_loss
 
         cls_loss_avg.append(loc_loss.item())
         loc_loss_avg.append(cls_loss.item())
@@ -280,7 +297,7 @@ def fit(
             optimizer=optimizer,
             device=device,
             prefix=f"[{epoch}/{epochs}]",
-            xm=xm
+            xm=xm if is_xla else None
         )
         output_test  = validation_step(
             model=model,
@@ -293,7 +310,7 @@ def fit(
             nms_threshold=nms_thresh,
             score_threshold=score_thresh,
             prefix=f"[{epoch}/{epochs}]",
-            xm=xm
+            xm=xm if is_xla else None
         )
 
 
