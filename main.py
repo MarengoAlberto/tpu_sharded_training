@@ -35,7 +35,8 @@ from src.tensorboard import TensorBoardVisualizer
 
 
 
-def build_datasets(cfg, rank, world_size, device):
+def build_datasets(cfg, rank, world_size):
+    device = xm.xla_device() if is_xla else torch.device("cpu")
     print(f"Building datasets on rank {rank} and device {device}...")
 
     assert cfg.BATCH_SIZE % world_size == 0
@@ -109,7 +110,8 @@ def build_datasets(cfg, rank, world_size, device):
     )
 
 
-def build_od_model(cfg, device):
+def build_od_model(cfg):
+    device = xm.xla_device() if is_xla else torch.device("cpu")
     pi = 0.01
 
     model = Detector(
@@ -179,7 +181,7 @@ def main_worker(rank, world, cfg):
 
     # build datasets
     data_encoder = DataEncoder(input_size=cfg.IMG_SIZE[:2], classes=cfg.CLASSES)
-    train_dataset, train_loader, train_sampler, _, val_loader, _ = build_datasets(cfg, rank, world, device)
+    train_dataset, train_loader, train_sampler, _, val_loader, _ = build_datasets(cfg, rank, world)
     if getattr(device, "type", str(device)) == "cpu":
         print("loaded dataset")
     else:
@@ -187,7 +189,7 @@ def main_worker(rank, world, cfg):
         xm.master_print(f"\n=== dataset ===\n{pprint.pformat(train_dataset)}\n")
 
     # build model and loss
-    model = build_od_model(cfg, device)
+    model = build_od_model(cfg)
     if getattr(device, "type", str(device)) == "cpu":
         print("loaded model")
     else:
