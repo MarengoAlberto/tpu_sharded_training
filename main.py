@@ -79,7 +79,7 @@ def build_datasets(cfg, rank, device):
         sampler=train_sampler,
         drop_last=True,
         num_workers=NUM_WORKERS,
-        pin_memory=True,
+        pin_memory=False,
         persistent_workers=True,
         collate_fn=train_dataset.collate_fn,
     )
@@ -96,7 +96,7 @@ def build_datasets(cfg, rank, device):
         sampler=val_sampler,
         drop_last=True,
         num_workers=NUM_WORKERS,
-        pin_memory=True,
+        pin_memory=False,
         persistent_workers=True,
         collate_fn=val_dataset.collate_fn,
     )
@@ -230,7 +230,7 @@ def main_worker(rank, cfg):
     mAP_metric = MeanAveragePrecision(class_metrics=True).to(device)
 
     # 6. Intialize Visualizer.
-    tb_visualizer = TensorBoardVisualizer(logs_dir=cfg.log_dir)
+    # tb_visualizer = TensorBoardVisualizer(logs_dir=cfg.log_dir)
 
     if getattr(device, "type", str(device)) == "cpu":
         print("training begins")
@@ -253,7 +253,7 @@ def main_worker(rank, cfg):
         score_thresh=cfg.SCORE_THRESHOLD,
         device=device,
         checkpoint_dir=cfg.checkpoint_dir,
-        visualizer=tb_visualizer
+        visualizer=None
     )
 
 

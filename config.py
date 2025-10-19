@@ -5,8 +5,8 @@ from typing import Iterable
 
 @dataclass
 class Config:
-    IMG_SIZE: Iterable[int] = (512, 512, 3) #(80, 80, 3)
-    EPOCHS: int = 100
+    IMG_SIZE: Iterable[int] = (80, 80, 3) #(512, 512, 3)
+    EPOCHS: int = 1
     DEBUG_MODE: bool = False
     BACKEND: str = "tpu"
     XLA_CACHE: bool = False

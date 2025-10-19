@@ -19,6 +19,15 @@ def _base_loader_len(loader):
     return len(base)
 
 
+def set_sampler_epoch(loader, epoch):
+    sampler = getattr(loader, "sampler", None)
+    # for MpDeviceLoader, underlying DataLoader is in .loader
+    if sampler is None and hasattr(loader, "loader"):
+        sampler = getattr(loader.loader, "sampler", None)
+    if sampler is not None and hasattr(sampler, "set_epoch"):
+        sampler.set_epoch(epoch)
+
+
 def training_step(
         model,
         loader,
@@ -36,6 +45,7 @@ def training_step(
         if is_master:
             from tqdm import tqdm
             base_total = _base_loader_len(loader)
+            xm.master_print(f"The base total loader length is: {base_total}")
             pbar = tqdm(total=base_total, desc=f"[{prefix}] Train")
     else:
         from tqdm.auto import tqdm
@@ -264,6 +274,8 @@ def fit(
                "val_mAP": [], "val_mAP@50": []}
 
     for epoch in iterator:
+        set_sampler_epoch(loader_train, epoch)
+        set_sampler_epoch(loader_test, epoch)
         output_train = training_step(
             model=model,
             loader=loader_train,
