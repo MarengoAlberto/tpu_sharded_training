@@ -77,14 +77,10 @@ def training_step(
             _probe(f"got batch {i}", xm)
 
         optimizer.zero_grad()
-        if is_xla:
-            image_batch = torch.stack(batch_sample[0])
-            box_targets = torch.stack(batch_sample[3])
-            cls_targets = torch.stack(batch_sample[4])
-        else:
-            image_batch = torch.stack(batch_sample[0]).to(device)
-            box_targets = torch.stack(batch_sample[3]).to(device)
-            cls_targets = torch.stack(batch_sample[4]).to(device)
+
+        image_batch = torch.stack(batch_sample[0]).to(device)
+        box_targets = torch.stack(batch_sample[3]).to(device)
+        cls_targets = torch.stack(batch_sample[4]).to(device)
 
         if i < 2:
             _probe(f"stacked batch {i}", xm)
@@ -93,8 +89,8 @@ def training_step(
         # with ctx:
         pred_boxes, pred_labels = model(image_batch)
 
-        loc_loss = loss_fn["loc_loss"](pred_boxes, box_targets, cls_targets)
-        cls_loss = loss_fn["cls_loss"](pred_labels, cls_targets)
+        loc_loss = loss_fn["loc_loss"](pred_boxes.float(), box_targets, cls_targets)
+        cls_loss = loss_fn["cls_loss"](pred_labels.float(), cls_targets)
         total_loss = loss_weights["loc_wt"]*loc_loss + loss_weights["cls_wt"]*cls_loss
 
         if is_xla:
@@ -105,7 +101,7 @@ def training_step(
         if i < 2: _probe("backward done", xm)
 
         if is_xla:
-            xm.optimizer_step(optimizer, barrier=False)
+            xm.optimizer_step(optimizer, barrier=True)
             xm.mark_step()
             if i < 2: _probe("optimizer_step + mark_step done", xm)
         else:
@@ -180,14 +176,9 @@ def validation_step(
 
     for i, batch_sample in enumerate(device_loader):
 
-        if is_xla:
-            image_batch = torch.stack(batch_sample[0])
-            box_targets = torch.stack(batch_sample[3])
-            cls_targets = torch.stack(batch_sample[4])
-        else:
-            image_batch = torch.stack(batch_sample[0]).to(device)
-            box_targets = torch.stack(batch_sample[3]).to(device)
-            cls_targets = torch.stack(batch_sample[4]).to(device)
+        image_batch = torch.stack(batch_sample[0]).to(device)
+        box_targets = torch.stack(batch_sample[3]).to(device)
+        cls_targets = torch.stack(batch_sample[4]).to(device)
 
         with torch.no_grad():
             # ctx = torch.autocast("xla", dtype=torch.bfloat16) if is_xla else contextlib.nullcontext()
