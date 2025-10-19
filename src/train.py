@@ -41,7 +41,6 @@ def training_step(
 
     if is_xla:
         is_master = xm.is_master_ordinal()
-        print(f'Running on TPU device, is_master={is_master}.')
         device_loader = loader
         pbar = None
         if is_master:
@@ -53,7 +52,8 @@ def training_step(
         print("Running on non-TPU device.")
         is_master = True
         device_loader = tqdm(loader, dynamic_ncols=True)
-
+    print(f'Running on TPU device, is_master={is_master}.')
+    print(f'Variable pbar: {pbar}')
     model.train()
 
     # iterator = tqdm(loader, dynamic_ncols=True)
