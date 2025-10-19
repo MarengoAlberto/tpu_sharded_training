@@ -8,18 +8,12 @@ import torch.optim as optim
 from torchinfo import summary
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
 
-is_xla = False
-try:
-    import torch_xla.runtime as xr
-    import torch_xla.core.xla_model as xm
-    import torch_xla.distributed.xla_multiprocessing as xmp
-    import torch_xla.distributed.parallel_loader as pl
-    from src.distributed_utils import apply_fsdp_with_ckpt_detector
+
+if os.getenv("PJRT_DEVICE", "CPU") == "TPU":
     is_xla = True
-except Exception:
+else:
+    is_xla = False
     print("Failed to import torch_xla. Please ensure that torch_xla is installed.")
-
-
 
 
 from config import Config
@@ -35,8 +29,7 @@ from src.tensorboard import TensorBoardVisualizer
 
 
 
-def build_datasets(cfg, rank, world_size):
-    device = xm.xla_device() if is_xla else torch.device("cpu")
+def build_datasets(cfg, rank, world_size, device):
     print(f"Building datasets on rank {rank} and device {device}...")
 
     assert cfg.BATCH_SIZE % world_size == 0
@@ -82,6 +75,7 @@ def build_datasets(cfg, rank, world_size):
     )
 
     if is_xla:
+        import torch_xla.distributed.parallel_loader as pl
         train_loader = pl.MpDeviceLoader(train_loader, device)
 
     val_sampler = torch.utils.data.distributed.DistributedSampler(
@@ -110,8 +104,7 @@ def build_datasets(cfg, rank, world_size):
     )
 
 
-def build_od_model(cfg):
-    device = xm.xla_device() if is_xla else torch.device("cpu")
+def build_od_model(cfg, device):
     pi = 0.01
 
     model = Detector(
@@ -130,25 +123,27 @@ def build_od_model(cfg):
     if getattr(device, "type", str(device)) == "cpu":
         print("Loaded model")
     else:
+        from src.distributed_utils import apply_fsdp_with_ckpt_detector
+
         model = apply_fsdp_with_ckpt_detector(model)
 
-        model.eval()  # safer for summary
-
-        device = next(model.parameters()).device
-
-        # Adjust these to your model:
-        H, W, C = cfg.IMG_SIZE
-
-        x = torch.randn(1, C, H, W, device=device)
-
-        # If your forward takes multiple inputs, pass a tuple/list, e.g. input_data=(x, y)
-        xm.master_print(summary(
-            model,
-            input_data=x,
-            row_settings=["var_names"],
-            col_names=["input_size", "output_size", "num_params", "trainable"],
-            verbose=0,  # optional: quieter logs
-        ))
+        # model.eval()  # safer for summary
+        #
+        # device = next(model.parameters()).device
+        #
+        # # Adjust these to your model:
+        # H, W, C = cfg.IMG_SIZE
+        #
+        # x = torch.randn(1, C, H, W, device=device)
+        #
+        # # If your forward takes multiple inputs, pass a tuple/list, e.g. input_data=(x, y)
+        # xm.master_print(summary(
+        #     model,
+        #     input_data=x,
+        #     row_settings=["var_names"],
+        #     col_names=["input_size", "output_size", "num_params", "trainable"],
+        #     verbose=0,  # optional: quieter logs
+        # ))
 
     return model
 
@@ -165,11 +160,17 @@ def main_worker(rank, world, cfg):
     set_seeds(rank)
 
     try:
-        devs = xm.get_xla_supported_devices()
-        print(f"Process {rank} sees devices: {devs}")
+        import torch_xla.core.xla_model as xm
+        import torch_xla.runtime as xr
+
         device = xm.xla_device()
-        xm.master_print(f"Process {rank} using device: {device}")
-        xm.master_print(f"Current version: {current_version_name} with cfg: {pprint.pformat(cfg)}")
+        try:
+            local_ord = xm.get_local_ordinal()
+        except Exception:
+            local_ord = -1
+
+        print(f"[child] rank={rank}/{world} local_ordinal={local_ord} device={device}", flush=True)
+
     except Exception as e:
         print(f"Could not initialize XLA device, defaulting to CPU. Exception: {e}")
         device = torch.device("cpu")
@@ -181,7 +182,7 @@ def main_worker(rank, world, cfg):
 
     # build datasets
     data_encoder = DataEncoder(input_size=cfg.IMG_SIZE[:2], classes=cfg.CLASSES)
-    train_dataset, train_loader, train_sampler, _, val_loader, _ = build_datasets(cfg, rank, world)
+    train_dataset, train_loader, train_sampler, _, val_loader, _ = build_datasets(cfg, rank, world, device)
     if getattr(device, "type", str(device)) == "cpu":
         print("loaded dataset")
     else:
@@ -189,7 +190,7 @@ def main_worker(rank, world, cfg):
         xm.master_print(f"\n=== dataset ===\n{pprint.pformat(train_dataset)}\n")
 
     # build model and loss
-    model = build_od_model(cfg)
+    model = build_od_model(cfg, device)
     if getattr(device, "type", str(device)) == "cpu":
         print("loaded model")
     else:
@@ -259,19 +260,15 @@ def main_worker(rank, world, cfg):
 
 
 def run(args):
-    # Force single process on CPU debug (PJRT CPU doesn’t simulate multiple devices)
-    # if args.BACKEND.lower() == "cpu":
-    #     args.WORLD_SIZE = 1
-    #     print(f"Running in CPU mode, forcing world_size to {args.WORLD_SIZE}")
-    # else:
-    #     args.WORLD_SIZE = 8
-    #     print(f"Running in {args.BACKEND} mode with world_size: {args.WORLD_SIZE}")
-    #     print(os.environ)
-
     if not is_xla:
         main_worker(0, args)
     else:
-        world = int(os.environ.get("TPU_NUM_DEVICES", "0")) or len(xm.get_xla_supported_devices())
+        import torch_xla.runtime as xr
+        import torch_xla.distributed.xla_multiprocessing as xmp
+
+        print("Spawning processes...")
+        world = int(os.environ.get("TPU_NUM_DEVICES", "0")) or 8
+        print(f"[parent] PJRT_DEVICE={xr.device_type()} planned_world={world}", flush=True)
         xmp.spawn(main_worker, args=(world, args), nprocs=None)
 
 
