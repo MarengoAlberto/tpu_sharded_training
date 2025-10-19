@@ -32,17 +32,16 @@ def training_step(
         optimizer,
         device,
         prefix="",
+        xm=None
 ):
 
     if is_xla:
-        from torch_xla.core import xla_model as xm
         is_master = xm.is_master_ordinal()  # only one process prints
         device_loader = loader
         pbar = None
         if is_master:
             from tqdm import tqdm
             base_total = _base_loader_len(loader)
-            xm.master_print(f"The base total loader length is: {base_total}")
             pbar = tqdm(total=base_total, desc=f"[{prefix}] Train")
     else:
         from tqdm.auto import tqdm
@@ -120,10 +119,10 @@ def validation_step(
         nms_threshold,
         score_threshold,
         prefix="",
+        xm=None
 ):
 
     if is_xla:
-        from torch_xla.core import xla_model as xm
         is_master = xm.is_master_ordinal()  # only one process prints
         device_loader = loader
         pbar = None
@@ -262,6 +261,7 @@ def fit(
         visualizer = None,
 ):
     if is_xla:
+        from torch_xla.core import xla_model as xm
         from .distributed_utils import save_fsdp_model
 
     iterator = tqdm_auto(range(epochs), dynamic_ncols=True)
@@ -279,7 +279,8 @@ def fit(
             loss_weights=loss_weights,
             optimizer=optimizer,
             device=device,
-            prefix=f"[{epoch}/{epochs}]"
+            prefix=f"[{epoch}/{epochs}]",
+            xm=xm
         )
         output_test  = validation_step(
             model=model,
@@ -291,7 +292,8 @@ def fit(
             encoder=encoder,
             nms_threshold=nms_thresh,
             score_threshold=score_thresh,
-            prefix=f"[{epoch}/{epochs}]"
+            prefix=f"[{epoch}/{epochs}]",
+            xm=xm
         )
 
 
