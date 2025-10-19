@@ -120,7 +120,7 @@ set -e
 PY=~/.pyenv/versions/py312/bin/python
 $PY -V
 cd ~/proj
-PJRT_DEVICE=TPU PYTHONUNBUFFERED=1 XLA_USE_BF16=1 \
+TPU_NUM_DEVICES=8  PJRT_DEVICE=TPU PYTHONUNBUFFERED=1 XLA_USE_BF16=1 \
   $PY -m main
 '
 

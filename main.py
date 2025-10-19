@@ -35,9 +35,8 @@ from src.tensorboard import TensorBoardVisualizer
 
 
 
-def build_datasets(cfg, rank, device):
+def build_datasets(cfg, rank, world_size, device):
     print(f"Building datasets on rank {rank} and device {device}...")
-    world_size = len(xm.get_xla_supported_devices())
 
     assert cfg.BATCH_SIZE % world_size == 0
     local_batch_size = cfg.BATCH_SIZE // world_size
@@ -152,7 +151,7 @@ def build_od_model(cfg, device):
     return model
 
 
-def main_worker(rank, cfg):
+def main_worker(rank, world, cfg):
 
     download_and_unzip_zip(cfg.ZIP_URL, cfg.CONTAINER_DATA_DIR)
 
@@ -180,7 +179,7 @@ def main_worker(rank, cfg):
 
     # build datasets
     data_encoder = DataEncoder(input_size=cfg.IMG_SIZE[:2], classes=cfg.CLASSES)
-    train_dataset, train_loader, train_sampler, _, val_loader, _ = build_datasets(cfg, rank, device)
+    train_dataset, train_loader, train_sampler, _, val_loader, _ = build_datasets(cfg, rank, world, device)
     if getattr(device, "type", str(device)) == "cpu":
         print("loaded dataset")
     else:
@@ -270,7 +269,8 @@ def run(args):
     if not is_xla:
         main_worker(0, args)
     else:
-        xmp.spawn(main_worker, args=(args,), nprocs=8)
+        world = int(os.environ.get("TPU_NUM_DEVICES", "0")) or len(xm.get_xla_supported_devices())
+        xmp.spawn(main_worker, args=(world, args), nprocs=None)
 
 
 if __name__ == "__main__":
