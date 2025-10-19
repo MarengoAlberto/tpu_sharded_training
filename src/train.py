@@ -22,9 +22,6 @@ def set_sampler_epoch(loader, epoch):
     if sampler is not None and hasattr(sampler, "set_epoch"):
         sampler.set_epoch(epoch)
 
-def _probe(msg, xm):
-    print(f"[rank {xm.get_local_ordinal()}] {msg}", flush=True)
-
 def _safe_mean(xs, default=np.nan):
     return float(np.mean(xs)) if len(xs) else default
 
@@ -65,25 +62,11 @@ def training_step(
 
     for i, batch_sample in enumerate(device_loader):
 
-        if i == 0 and is_xla:
-            try:
-                rank = xm.get_local_ordinal()
-
-            except Exception:
-                rank = -1
-            print(f"[rank {rank}] reached first batch — compiling...", flush=True)
-
-        if i < 2:
-            _probe(f"got batch {i}", xm)
-
         optimizer.zero_grad()
 
         image_batch = torch.stack(batch_sample[0]).to(device)
         box_targets = torch.stack(batch_sample[3]).to(device).float()
         cls_targets = torch.stack(batch_sample[4]).to(device).long()
-
-        if i < 2:
-            _probe(f"stacked batch {i}", xm)
 
         # ctx = torch.autocast("xla", dtype=torch.bfloat16) if is_xla else contextlib.nullcontext()
         # with ctx:
@@ -95,15 +78,12 @@ def training_step(
 
         if is_xla:
             xm.mark_step()
-            _probe("marked step after forward", xm)
 
         total_loss.backward()
-        if i < 2: _probe("backward done", xm)
 
         if is_xla:
             xm.optimizer_step(optimizer, barrier=True)
             xm.mark_step()
-            if i < 2: _probe("optimizer_step + mark_step done", xm)
         else:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
