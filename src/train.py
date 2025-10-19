@@ -1,9 +1,11 @@
 import os
 import numpy as np
 import torch
-from tqdm.auto import tqdm
+from tqdm.auto import tqdm as tqdm_auto
 
 try:
+    from torch_xla.core import xla_model as xm
+    from torch_xla.distributed import parallel_loader as pl
     from .distributed_utils import save_fsdp_model
 except ImportError:
     pass
@@ -19,15 +21,30 @@ def training_step(
         prefix="",
 ):
 
+    try:
+        device_loader = pl.MpDeviceLoader(loader, device)
+        is_master = xm.is_master_ordinal()  # only one process prints
+        pbar = None
+        if is_master:
+            from tqdm import tqdm
+            pbar = tqdm(total=len(loader), desc=f"[{prefix}] Train")
+    except:
+        from tqdm.auto import tqdm
+        print("Running on non-TPU device.")
+        is_master = True
+        device_loader = tqdm(loader, dynamic_ncols=True)
+
+
+
     model.train()
 
-    iterator = tqdm(loader, dynamic_ncols=True)
+    # iterator = tqdm(loader, dynamic_ncols=True)
 
     cls_loss_avg = []
     loc_loss_avg = []
     total_loss_avg = []
 
-    for i, batch_sample in enumerate(iterator):
+    for i, batch_sample in enumerate(device_loader):
         optimizer.zero_grad()
         image_batch = torch.stack(batch_sample[0]).to(device)
         box_targets = torch.stack(batch_sample[3]).to(device)
@@ -40,8 +57,13 @@ def training_step(
         total_loss = loss_weights["loc_wt"]*loc_loss + loss_weights["cls_wt"]*cls_loss
         total_loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        optimizer.step()
-        optimizer.zero_grad(set_to_none=True)
+        try:
+            xm.optimizer_step(optimizer)
+            optimizer.zero_grad(set_to_none=True)
+            xm.mark_step()
+        except:
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
 
         optimizer_lr = optimizer.param_groups[0]["lr"]
 
@@ -53,7 +75,18 @@ def training_step(
         status+= f"Loc Loss: {np.mean(loc_loss_avg):.4f}, Cls Loss: {np.mean(cls_loss_avg):.4f}, "
         status+= f"LR: {optimizer_lr:.3f}"
 
-        iterator.set_description(status)
+        if is_master:
+            try:
+                pbar.update(1)
+                pbar.set_postfix_str(status)
+            except:
+                device_loader.set_description(status)
+
+    if is_master:
+        try:
+            pbar.close()
+        except:
+            pass
 
     return {"loc_loss": np.mean(loc_loss_avg), "cls_loss": np.mean(cls_loss_avg), "total_loss": np.mean(total_loss_avg)}
 
@@ -73,9 +106,22 @@ def validation_step(
         prefix="",
 ):
 
+    try:
+        device_loader = pl.MpDeviceLoader(loader, device)
+        is_master = xm.is_master_ordinal()  # only one process prints
+        pbar = None
+        if is_master:
+            from tqdm import tqdm
+            pbar = tqdm(total=len(loader), desc=f"[{prefix}] Train")
+    except:
+        from tqdm.auto import tqdm
+        print("Running on non-TPU device.")
+        is_master = True
+        device_loader = tqdm(loader, dynamic_ncols=True)
+
     model.eval()
 
-    iterator = tqdm(loader, dynamic_ncols=True)
+    # iterator = tqdm(loader, dynamic_ncols=True)
 
     cls_loss_avg = []
     loc_loss_avg = []
@@ -84,7 +130,7 @@ def validation_step(
     metric_fn.reset()
 
 
-    for i, batch_sample in enumerate(iterator):
+    for i, batch_sample in enumerate(device_loader):
 
         image_batch = torch.stack(batch_sample[0]).to(device)
         box_targets = torch.stack(batch_sample[3]).to(device)
@@ -141,7 +187,12 @@ def validation_step(
         status = f"{prefix}[Test][{i}] Total Loss: {np.mean(total_loss_avg):.4f}, "
         status+= f"Loc Loss: {np.mean(loc_loss_avg):.4f}, Cls Loss: {np.mean(cls_loss_avg):.4f}, "
 
-        iterator.set_description(status)
+        if is_master:
+            try:
+                pbar.update(1)
+                pbar.set_postfix_str(status)
+            except:
+                device_loader.set_description(status)
 
 
     metrics_dict = metric_fn.compute()
@@ -149,7 +200,18 @@ def validation_step(
     map_50 = float(metrics_dict["map_50"])
     status+= f"val_mAP@50: {map_50:.3f}"
 
-    iterator.set_description(status)
+    if is_master:
+        try:
+            pbar.update(1)
+            pbar.set_postfix_str(status)
+        except:
+            device_loader.set_description(status)
+
+    if is_master:
+        try:
+            pbar.close()
+        except:
+            pass
 
     output = {"loc_loss": np.mean(loc_loss_avg), "cls_loss": np.mean(cls_loss_avg), "total_loss":np.mean(total_loss_avg),
               "metrics": metrics_dict}
@@ -176,7 +238,7 @@ def fit(
 ):
 
 
-    iterator = tqdm(range(epochs), dynamic_ncols=True)
+    iterator = tqdm_auto(range(epochs), dynamic_ncols=True)
 
     history = {"epoch": [], "train_loss": [], "test_loss": [],
                "val_mAP": [], "val_mAP@50": []}
