@@ -1,95 +1,62 @@
-# probe_spawn.py
+# probe_spawn_v2.py
 import os, time, contextlib
-
-# --- Optional: quieten logs a bit ---
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "1")
 os.environ.setdefault("GRPC_VERBOSITY", "ERROR")
 
-# --- Imports (CPU fallback is fine) ---
-import torch
-
-# These imports must succeed to use TPU/XLA
+# We import torch_xla.runtime (xr) in parent is OK; avoid xm.* calls until inside child.
 try:
     import torch_xla.runtime as xr
-    import torch_xla.core.xla_model as xm
-    import torch_xla.distributed.xla_multiprocessing as xmp
-    from torch_xla.debug import metrics as met
-    IS_XLA = True
+    XLA_OK = True
 except Exception as e:
-    print(f"[parent] torch_xla not available: {e}", flush=True)
-    IS_XLA = False
+    print(f"[parent] torch_xla.runtime not available: {e}", flush=True)
+    XLA_OK = False
 
 
-def _parent_banner():
-    """Runs in the parent (before spawn) to show what PJRT *could* see."""
-    if not IS_XLA:
-        print("[parent] XLA not available; will run single-process on CPU.", flush=True)
-        return 1
-    # Honor TPU_NUM_DEVICES if set; else count supported devices
-    with contextlib.suppress(Exception):
-        devs = xm.get_xla_supported_devices()
-    devs = devs if devs else []
-    world = int(os.environ.get("TPU_NUM_DEVICES", "0")) or (len(devs) if devs else 1)
-    print(f"[parent] PJRT_DEVICE={xr.device_type()} supports={devs} planned_world={world}", flush=True)
-    return world
+def child_worker(rank: int, world: int):
+    # All XLA core APIs must be called *inside* the child.
+    import torch
+    import torch_xla.core.xla_model as xm
+    from torch_xla.debug import metrics as met
 
-
-def _child_worker(rank: int, world: int):
-    """Each spawned process lands here."""
-    if not IS_XLA:
-        dev = torch.device("cpu")
-        print(f"[child] rank={rank}/{world} device={dev} (CPU mode)", flush=True)
-        return
-
-    # Bind to this process's XLA device (don’t try to index devices yourself)
-    dev = xm.xla_device()
-
-    # Local ordinal is the per-host device index this process is bound to
+    dev = xm.xla_device()  # binds this rank to its TPU core
     with contextlib.suppress(Exception):
         local_ord = xm.get_local_ordinal()
 
     print(
-        f"[child] rank={rank}/{world} local_ordinal={local_ord} default_device={dev} "
-        f"PJRT_DEVICE={xr.device_type()}",
+        f"[child] rank={rank}/{world} local_ordinal={local_ord} "
+        f"default_device={dev} PJRT_DEVICE={xr.device_type()}",
         flush=True,
     )
 
-    # Barrier so you can see all children reached here
-    xm.rendezvous("after_setup_prints")
+    xm.rendezvous("after_setup")
 
-    # --- Tiny “compile” smoke: first step triggers XLA compile once ---
-    if xm.is_master_ordinal():
-        print("[child] master: running a tiny XLA op to trigger compile…", flush=True)
-
+    # Trigger one tiny compile so you *see* batch 0 happen
     t0 = time.perf_counter()
     x = torch.randn(4, 4, device=dev)
-    y = torch.matmul(x, x) + 1.0
-    loss = y.sum()
-    loss.backward()
-    # Mark the step so XLA sends work to the device
+    y = (x @ x) + 1.0
+    y.sum().backward()
     xm.mark_step()
     dt = time.perf_counter() - t0
-
     print(f"[child] rank={rank} first_step_compile_dt={dt:.2f}s", flush=True)
 
-    # Optional: short XLA metrics snapshot (master only)
-    with contextlib.suppress(Exception):
-        if xm.is_master_ordinal():
-            print(met.metrics_report(fmt="text", shorten=True), flush=True)
+    if xm.is_master_ordinal():
+        print(met.metrics_report(fmt="text", shorten=True), flush=True)
 
-    # All done
     xm.rendezvous("done")
 
 
 def main():
-    world = _parent_banner()
-
-    if not IS_XLA:
-        _child_worker(rank=0, world=1)
+    if not XLA_OK:
+        print("[parent] XLA not available; exiting.", flush=True)
         return
 
-    # Under PJRT, you MUST use nprocs=None. Limit via TPU_NUM_DEVICES (already used above).
-    xmp.spawn(_child_worker, args=(world,), nprocs=None)
+    # DO NOT call xm.* here. Let PJRT decide device count from TPU_NUM_DEVICES.
+    world = int(os.environ.get("TPU_NUM_DEVICES", "0")) or 8
+    print(f"[parent] PJRT_DEVICE={xr.device_type()} planned_world={world}", flush=True)
+
+    # Spawn: nprocs=None (PJRT decides). Limit devices via TPU_NUM_DEVICES.
+    import torch_xla.distributed.xla_multiprocessing as xmp
+    xmp.spawn(child_worker, args=(world,), nprocs=None)
 
 
 if __name__ == "__main__":

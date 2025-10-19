@@ -114,6 +114,16 @@ print("XLA devices:", xm.get_xla_supported_devices())
 PY
 '
 
+# Probe TEST
+gcloud compute tpus tpu-vm ssh "$TPU_NAME" --zone="$ZONE" --command '
+set -e
+PY=~/.pyenv/versions/py312/bin/python
+$PY -V
+cd ~/proj
+TPU_NUM_DEVICES=8 PJRT_DEVICE=TPU PYTHONUNBUFFERED=1 XLA_USE_BF16=1 \
+  $PY -u probe_spawn.py
+'
+
 # RUN your training script
 gcloud compute tpus tpu-vm ssh "$TPU_NAME" --zone="$ZONE" --command '
 set -e
