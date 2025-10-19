@@ -113,8 +113,8 @@ def training_step(
 
         optimizer_lr = optimizer.param_groups[0]["lr"]
 
-        cls_loss_avg.append(cls_loss.item())
-        loc_loss_avg.append(loc_loss.item())
+        # cls_loss_avg.append(cls_loss.item())
+        # loc_loss_avg.append(loc_loss.item())
         total_loss_avg.append(total_loss.item())
 
         status = f"{prefix}[Train][{i}] Total Loss: {np.mean(total_loss_avg):.4f}, "
