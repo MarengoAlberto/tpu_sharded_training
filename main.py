@@ -261,7 +261,7 @@ def main_worker(rank, world, cfg):
 
 def run(args):
     if not is_xla:
-        main_worker(0, args)
+        main_worker(0, 1, args)
     else:
         import torch_xla.runtime as xr
         import torch_xla.distributed.xla_multiprocessing as xmp

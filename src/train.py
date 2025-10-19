@@ -3,14 +3,10 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm as tqdm_auto
 
-using_xla = False
-try:
-    from torch_xla.core import xla_model as xm
-    from torch_xla.distributed import parallel_loader as pl
-    from .distributed_utils import save_fsdp_model
-    using_xla = True
-except ImportError:
-    pass
+if os.getenv("PJRT_DEVICE", "CPU") == "TPU":
+    is_xla = True
+else:
+    is_xla = False
 
 
 def _base_loader_len(loader):
@@ -38,7 +34,7 @@ def training_step(
         prefix="",
 ):
 
-    if using_xla:
+    if is_xla:
         is_master = xm.is_master_ordinal()  # only one process prints
         device_loader = loader
         pbar = None
@@ -53,19 +49,16 @@ def training_step(
         is_master = True
         device_loader = tqdm(loader, dynamic_ncols=True)
 
-
-
     model.train()
 
     # iterator = tqdm(loader, dynamic_ncols=True)
-
     cls_loss_avg = []
     loc_loss_avg = []
     total_loss_avg = []
 
     for i, batch_sample in enumerate(device_loader):
         optimizer.zero_grad()
-        if using_xla:
+        if is_xla:
             image_batch = torch.stack(batch_sample[0])
             box_targets = torch.stack(batch_sample[3])
             cls_targets = torch.stack(batch_sample[4])
@@ -81,7 +74,7 @@ def training_step(
         total_loss = loss_weights["loc_wt"]*loc_loss + loss_weights["cls_wt"]*cls_loss
         total_loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        if using_xla:
+        if is_xla:
             xm.optimizer_step(optimizer)
             optimizer.zero_grad(set_to_none=True)
             xm.mark_step()
@@ -100,14 +93,14 @@ def training_step(
         status+= f"LR: {optimizer_lr:.3f}"
 
         if is_master:
-            if using_xla:
+            if is_xla:
                 pbar.update(1)
                 pbar.set_postfix_str(status)
             else:
                 device_loader.set_description(status)
 
     if is_master:
-        if using_xla:
+        if is_xla:
             pbar.close()
 
     return {"loc_loss": np.mean(loc_loss_avg), "cls_loss": np.mean(cls_loss_avg), "total_loss": np.mean(total_loss_avg)}
@@ -128,7 +121,7 @@ def validation_step(
         prefix="",
 ):
 
-    if using_xla:
+    if is_xla:
         is_master = xm.is_master_ordinal()  # only one process prints
         device_loader = loader
         pbar = None
@@ -155,7 +148,7 @@ def validation_step(
 
     for i, batch_sample in enumerate(device_loader):
 
-        if using_xla:
+        if is_xla:
             image_batch = torch.stack(batch_sample[0])
             box_targets = torch.stack(batch_sample[3])
             cls_targets = torch.stack(batch_sample[4])
@@ -182,7 +175,7 @@ def validation_step(
 
         for idx, (box_raw, label_raw) in enumerate(zip(batch_sample[1], batch_sample[2])):
 
-            if using_xla:
+            if is_xla:
                 boxes_raw_per_image  = box_raw
                 labels_raw_per_image = label_raw
             else:
@@ -220,7 +213,7 @@ def validation_step(
         status+= f"Loc Loss: {np.mean(loc_loss_avg):.4f}, Cls Loss: {np.mean(cls_loss_avg):.4f}, "
 
         if is_master:
-            if using_xla:
+            if is_xla:
                 pbar.update(1)
                 pbar.set_postfix_str(status)
             else:
@@ -233,14 +226,14 @@ def validation_step(
     status+= f"val_mAP@50: {map_50:.3f}"
 
     if is_master:
-        if using_xla:
+        if is_xla:
             pbar.update(1)
             pbar.set_postfix_str(status)
         else:
             device_loader.set_description(status)
 
     if is_master:
-        if using_xla:
+        if is_xla:
             pbar.close()
 
     output = {"loc_loss": np.mean(loc_loss_avg), "cls_loss": np.mean(cls_loss_avg), "total_loss":np.mean(total_loss_avg),
@@ -266,7 +259,10 @@ def fit(
         checkpoint_dir = "",
         visualizer = None,
 ):
-
+    if is_xla:
+        from torch_xla.core import xla_model as xm
+        from torch_xla.distributed import parallel_loader as pl
+        from .distributed_utils import save_fsdp_model
 
     iterator = tqdm_auto(range(epochs), dynamic_ncols=True)
 
@@ -339,9 +335,6 @@ def fit(
                 )
 
     return history
-
-
-
 
 def end_epoch_verbose(iterator, epoch, output_train, output_test):
 

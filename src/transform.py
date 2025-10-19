@@ -1,6 +1,7 @@
 import albumentations as A
 from albumentations.augmentations import Normalize
 from albumentations.pytorch.transforms import ToTensorV2
+from albumentations.augmentations.crops.transforms import RandomSizedBBoxSafeCrop
 
 
 def apply_augmentations(height=300, width=300):
@@ -74,7 +75,8 @@ def get_augmentations(height=300, width=300):
         # A.OneOf([A.RandomBrightnessContrast(p=1), A.HueSaturationValue(p=1)], p=0.5,),
         
         ###### NEW ######
-        A.RandomResizedCrop(size=(height, width), scale=(0.5, 1.0), ratio=(0.75, 1.33), p=1.0),
+        # A.RandomResizedCrop(size=(height, width), scale=(0.5, 1.0), ratio=(0.75, 1.33), p=1.0),
+        RandomSizedBBoxSafeCrop(height=height, width=width, erosion_rate=0.0, p=0.7),
         A.HorizontalFlip(p=0.5),
         A.VerticalFlip(p=0.1),
         A.Affine(p=0.9),
@@ -98,7 +100,7 @@ def get_augmentations(height=300, width=300):
         A.RandomCropFromBorders(crop_left=0.1, crop_right=0.1, crop_top=0.1, crop_bottom=0.1, p=0.2),
 
         # Regularization
-        A.CoarseDropout(p=0.5),
+        # A.CoarseDropout(p=0.5),
 
         # Final size
         A.LongestMaxSize(max_size=width, p=1.0),
