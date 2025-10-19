@@ -9,7 +9,7 @@ class Lateral_Connection(nn.Module):
     def forward(self, inputs):
         prev, current = inputs
         fm_size = current.shape[2:]
-        up = F.interpolate(prev, size=fm_size, mode='bilinear', antialias=True, align_corners=True)
+        up = F.interpolate(prev, size=fm_size, mode='bilinear', antialias=False, align_corners=True)
         current = self.conv1x1(current)
         x = up + current
         
