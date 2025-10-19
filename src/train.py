@@ -52,8 +52,7 @@ def training_step(
         print("Running on non-TPU device.")
         is_master = True
         device_loader = tqdm(loader, dynamic_ncols=True)
-    print(f'Running on TPU device, is_master={is_master}.')
-    print(f'Variable pbar: {pbar}')
+
     model.train()
 
     # iterator = tqdm(loader, dynamic_ncols=True)
@@ -106,7 +105,7 @@ def training_step(
         if i < 2: _probe("backward done", xm)
 
         if is_xla:
-            xm.optimizer_step(optimizer, barrier=True)
+            xm.optimizer_step(optimizer, barrier=False)
             xm.mark_step()
             if i < 2: _probe("optimizer_step + mark_step done", xm)
         else:
@@ -126,9 +125,6 @@ def training_step(
 
         if is_xla and is_master and (i % 20 == 0):
             pbar.update(20 if i else 1)
-
-        if i < 2:
-            xm.rendezvous(f"after_step_{i}")
 
         # if is_master:
         #     if is_xla:
