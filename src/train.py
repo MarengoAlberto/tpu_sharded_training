@@ -37,7 +37,7 @@ def training_step(
 ):
 
     if is_xla:
-        is_master = xm.is_master_ordinal()  # only one process prints
+        is_master = xm.get_local_ordinal()  # only one process prints
         device_loader = loader
         pbar = None
         if is_master:
@@ -61,7 +61,7 @@ def training_step(
 
         if i == 0 and is_xla:
             try:
-                rank = xm.get_ordinal()
+                rank = xm.get_local_ordinal()
             except Exception:
                 rank = -1
             print(f"[rank {rank}] reached first batch — compiling...", flush=True)
@@ -76,13 +76,13 @@ def training_step(
             box_targets = torch.stack(batch_sample[3]).to(device)
             cls_targets = torch.stack(batch_sample[4]).to(device)
 
-        ctx = torch.autocast("xla", dtype=torch.bfloat16) if is_xla else contextlib.nullcontext()
-        with ctx:
-            pred_boxes, pred_labels = model(image_batch)
+        # ctx = torch.autocast("xla", dtype=torch.bfloat16) if is_xla else contextlib.nullcontext()
+        # with ctx:
+        pred_boxes, pred_labels = model(image_batch)
 
-            loc_loss = loss_fn["loc_loss"](pred_boxes, box_targets, cls_targets)
-            cls_loss = loss_fn["cls_loss"](pred_labels, cls_targets)
-            total_loss = loss_weights["loc_wt"]*loc_loss + loss_weights["cls_wt"]*cls_loss
+        loc_loss = loss_fn["loc_loss"](pred_boxes, box_targets, cls_targets)
+        cls_loss = loss_fn["cls_loss"](pred_labels, cls_targets)
+        total_loss = loss_weights["loc_wt"]*loc_loss + loss_weights["cls_wt"]*cls_loss
 
         if is_xla:
             xm.mark_step()
@@ -138,7 +138,7 @@ def validation_step(
 ):
 
     if is_xla:
-        is_master = xm.is_master_ordinal()  # only one process prints
+        is_master = xm.get_local_ordinal()  # only one process prints
         device_loader = loader
         pbar = None
         if is_master:
@@ -174,13 +174,13 @@ def validation_step(
             cls_targets = torch.stack(batch_sample[4]).to(device)
 
         with torch.no_grad():
-            ctx = torch.autocast("xla", dtype=torch.bfloat16) if is_xla else contextlib.nullcontext()
-            with ctx:
-                pred_boxes, pred_labels = model(image_batch)
+            # ctx = torch.autocast("xla", dtype=torch.bfloat16) if is_xla else contextlib.nullcontext()
+            # with ctx:
+            pred_boxes, pred_labels = model(image_batch)
 
-                loc_loss = loss_fn["loc_loss"](pred_boxes, box_targets, cls_targets)
-                cls_loss = loss_fn["cls_loss"](pred_labels, cls_targets)
-                total_loss = loss_weights["loc_wt"]*loc_loss + loss_weights["cls_wt"]*cls_loss
+        loc_loss = loss_fn["loc_loss"](pred_boxes, box_targets, cls_targets)
+        cls_loss = loss_fn["cls_loss"](pred_labels, cls_targets)
+        total_loss = loss_weights["loc_wt"]*loc_loss + loss_weights["cls_wt"]*cls_loss
 
         cls_loss_avg.append(loc_loss.item())
         loc_loss_avg.append(cls_loss.item())
