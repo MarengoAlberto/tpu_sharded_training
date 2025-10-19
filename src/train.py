@@ -52,7 +52,7 @@ def training_step(
         print("Running on non-TPU device.")
         is_master = True
         device_loader = tqdm(loader, dynamic_ncols=True)
-
+    print(f'base_total: {_base_loader_len(device_loader)}')
     model.train()
 
     # iterator = tqdm(loader, dynamic_ncols=True)
@@ -115,23 +115,20 @@ def training_step(
 
         optimizer_lr = optimizer.param_groups[0]["lr"]
 
-        # cls_loss_avg.append(loc_loss.item())
-        # loc_loss_avg.append(cls_loss.item())
-        # total_loss_avg.append(total_loss.item())
-        #
-        # status = f"{prefix}[Train][{i}] Total Loss: {np.mean(total_loss_avg):.4f}, "
-        # status+= f"Loc Loss: {np.mean(loc_loss_avg):.4f}, Cls Loss: {np.mean(cls_loss_avg):.4f}, "
-        # status+= f"LR: {optimizer_lr:.3f}"
+        cls_loss_avg.append(loc_loss.item())
+        loc_loss_avg.append(cls_loss.item())
+        total_loss_avg.append(total_loss.item())
 
-        if is_xla and is_master and (i % 20 == 0):
-            pbar.update(20 if i else 1)
+        status = f"{prefix}[Train][{i}] Total Loss: {np.mean(total_loss_avg):.4f}, "
+        status+= f"Loc Loss: {np.mean(loc_loss_avg):.4f}, Cls Loss: {np.mean(cls_loss_avg):.4f}, "
+        status+= f"LR: {optimizer_lr:.3f}"
 
-        # if is_master:
-        #     if is_xla:
-        #         pbar.update(1)
-        #         pbar.set_postfix_str(status)
-        #     else:
-        #         device_loader.set_description(status)
+        if is_master:
+            if is_xla:
+                pbar.update(1)
+                pbar.set_postfix_str(status)
+            else:
+                device_loader.set_description(status)
 
     if is_master:
         if is_xla:
