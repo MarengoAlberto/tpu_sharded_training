@@ -86,6 +86,9 @@ def training_step(
             box_targets = torch.stack(batch_sample[3]).to(device)
             cls_targets = torch.stack(batch_sample[4]).to(device)
 
+        if i < 2:
+            _probe(f"stacked batch {i}", xm)
+
         # ctx = torch.autocast("xla", dtype=torch.bfloat16) if is_xla else contextlib.nullcontext()
         # with ctx:
         pred_boxes, pred_labels = model(image_batch)
