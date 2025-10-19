@@ -32,15 +32,23 @@ from src.loss import OHEMLoss, SmoothL1Loss, FocalLoss, IoULoss
 from src.tensorboard import TensorBoardVisualizer
 
 
+def xla_topology_banner(tag="init"):
+    devs = xm.get_xla_supported_devices()   # e.g., ['TPU:0', 'TPU:1', ...]
+    world = xm.xla_world_size()
+    rank = xm.get_ordinal()
+    lrank = xm.get_local_ordinal()
+    xm.master_print(
+        f"[{tag}] PJRT_DEVICE={xr.device_type()} supported={devs} "
+        f"world={world} rank={rank} local_rank={lrank} device={xm.xla_device()}",
+    )
+
 
 
 def build_datasets(cfg, rank, device):
     print(f"Building datasets on rank {rank} and device {device}...")
-    if getattr(device, "type", str(device)) == "cpu":
-        world_size = 1
-    else:
-        world_size = cfg.WORLD_SIZE
-        print(f"Dataset -- > world_size: {world_size}")
+    is_xla = getattr(device, "type", str(device)).lower() == "xla"
+    world_size = xm.xla_world_size() if is_xla else 1
+    rank = xm.get_ordinal() if is_xla else rank
 
     assert cfg.BATCH_SIZE % world_size == 0
     local_batch_size = cfg.BATCH_SIZE // world_size
@@ -84,7 +92,7 @@ def build_datasets(cfg, rank, device):
         collate_fn=train_dataset.collate_fn,
     )
 
-    if world_size > 1:
+    if is_xla:
         train_loader = pl.MpDeviceLoader(train_loader, device)
 
     val_sampler = torch.utils.data.distributed.DistributedSampler(
@@ -100,7 +108,7 @@ def build_datasets(cfg, rank, device):
         persistent_workers=True,
         collate_fn=val_dataset.collate_fn,
     )
-    if world_size > 1:
+    if is_xla:
         val_loader = pl.MpDeviceLoader(val_loader, device)
 
     return (
@@ -168,6 +176,7 @@ def main_worker(rank, cfg):
 
     try:
         device = xm.xla_device()
+        xla_topology_banner("setup")
         xm.master_print(f"Process {rank} using device: {device}")
         xm.master_print(f"Current version: {current_version_name} with cfg: {pprint.pformat(cfg)}")
     except Exception:
@@ -259,13 +268,13 @@ def main_worker(rank, cfg):
 
 def run(args):
     # Force single process on CPU debug (PJRT CPU doesn’t simulate multiple devices)
-    if args.BACKEND.lower() == "cpu":
-        args.WORLD_SIZE = 1
-        print(f"Running in CPU mode, forcing world_size to {args.WORLD_SIZE}")
-    else:
-        args.WORLD_SIZE = 8
-        print(f"Running in {args.BACKEND} mode with world_size: {args.WORLD_SIZE}")
-        print(os.environ)
+    # if args.BACKEND.lower() == "cpu":
+    #     args.WORLD_SIZE = 1
+    #     print(f"Running in CPU mode, forcing world_size to {args.WORLD_SIZE}")
+    # else:
+    #     args.WORLD_SIZE = 8
+    #     print(f"Running in {args.BACKEND} mode with world_size: {args.WORLD_SIZE}")
+    #     print(os.environ)
 
     if args.WORLD_SIZE <= 1:
         main_worker(0, args)
