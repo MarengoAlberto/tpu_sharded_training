@@ -41,6 +41,7 @@ def training_step(
 
     if is_xla:
         is_master = xm.is_master_ordinal()
+        print(f'Running on TPU device, is_master={is_master}.')
         device_loader = loader
         pbar = None
         if is_master:
