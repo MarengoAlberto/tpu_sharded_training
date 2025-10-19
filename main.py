@@ -166,6 +166,7 @@ def main_worker(rank, world, cfg):
         device = xm.xla_device()
         try:
             local_ord = xm.get_local_ordinal()
+            rank = local_ord
         except Exception:
             local_ord = -1
 
