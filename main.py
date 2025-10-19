@@ -32,23 +32,11 @@ from src.loss import OHEMLoss, SmoothL1Loss, FocalLoss, IoULoss
 from src.tensorboard import TensorBoardVisualizer
 
 
-def xla_topology_banner(tag="init"):
-    devs = xm.get_xla_supported_devices()   # e.g., ['TPU:0', 'TPU:1', ...]
-    world = len(devs)
-    rank = xm.get_ordinal()
-    lrank = xm.get_local_ordinal()
-    xm.master_print(
-        f"[{tag}] PJRT_DEVICE={xr.device_type()} supported={devs} "
-        f"world={world} rank={rank} local_rank={lrank} device={xm.xla_device()}",
-    )
-
-
 
 def build_datasets(cfg, rank, device):
     print(f"Building datasets on rank {rank} and device {device}...")
     is_xla = getattr(device, "type", str(device)).lower() == "xla"
-    world_size = xm.xla_world_size() if is_xla else 1
-    rank = xm.get_ordinal() if is_xla else rank
+    world_size = len(xm.get_xla_supported_devices())
 
     assert cfg.BATCH_SIZE % world_size == 0
     local_batch_size = cfg.BATCH_SIZE // world_size
@@ -175,8 +163,9 @@ def main_worker(rank, cfg):
     set_seeds(rank)
 
     try:
+        devs = xm.get_xla_supported_devices()
+        print(f"Process {rank} sees devices: {devs}")
         device = xm.xla_device()
-        xla_topology_banner("setup")
         xm.master_print(f"Process {rank} using device: {device}")
         xm.master_print(f"Current version: {current_version_name} with cfg: {pprint.pformat(cfg)}")
     except Exception as e:
