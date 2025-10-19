@@ -40,7 +40,7 @@ def training_step(
 ):
 
     if is_xla:
-        is_master = xm.get_local_ordinal()  # only one process prints
+        is_master = xm.is_master_ordinal()
         device_loader = loader
         pbar = None
         if is_master:
@@ -115,23 +115,26 @@ def training_step(
 
         optimizer_lr = optimizer.param_groups[0]["lr"]
 
-        cls_loss_avg.append(loc_loss.item())
-        loc_loss_avg.append(cls_loss.item())
-        total_loss_avg.append(total_loss.item())
+        # cls_loss_avg.append(loc_loss.item())
+        # loc_loss_avg.append(cls_loss.item())
+        # total_loss_avg.append(total_loss.item())
+        #
+        # status = f"{prefix}[Train][{i}] Total Loss: {np.mean(total_loss_avg):.4f}, "
+        # status+= f"Loc Loss: {np.mean(loc_loss_avg):.4f}, Cls Loss: {np.mean(cls_loss_avg):.4f}, "
+        # status+= f"LR: {optimizer_lr:.3f}"
 
-        status = f"{prefix}[Train][{i}] Total Loss: {np.mean(total_loss_avg):.4f}, "
-        status+= f"Loc Loss: {np.mean(loc_loss_avg):.4f}, Cls Loss: {np.mean(cls_loss_avg):.4f}, "
-        status+= f"LR: {optimizer_lr:.3f}"
+        if is_xla and is_master and (i % 20 == 0):
+            pbar.update(20 if i else 1)
 
         if i < 2:
             xm.rendezvous(f"after_step_{i}")
 
-        if is_master:
-            if is_xla:
-                pbar.update(1)
-                pbar.set_postfix_str(status)
-            else:
-                device_loader.set_description(status)
+        # if is_master:
+        #     if is_xla:
+        #         pbar.update(1)
+        #         pbar.set_postfix_str(status)
+        #     else:
+        #         device_loader.set_description(status)
 
     if is_master:
         if is_xla:
@@ -157,7 +160,7 @@ def validation_step(
 ):
 
     if is_xla:
-        is_master = xm.get_local_ordinal()  # only one process prints
+        is_master = xm.is_master_ordinal()
         device_loader = loader
         pbar = None
         if is_master:
