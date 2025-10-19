@@ -102,10 +102,12 @@ def training_step(
             _probe("marked step after forward", xm)
 
         total_loss.backward()
+        if i < 2: _probe("backward done", xm)
 
         if is_xla:
             xm.optimizer_step(optimizer, barrier=True)
             xm.mark_step()
+            if i < 2: _probe("optimizer_step + mark_step done", xm)
         else:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
@@ -120,6 +122,9 @@ def training_step(
         status = f"{prefix}[Train][{i}] Total Loss: {np.mean(total_loss_avg):.4f}, "
         status+= f"Loc Loss: {np.mean(loc_loss_avg):.4f}, Cls Loss: {np.mean(cls_loss_avg):.4f}, "
         status+= f"LR: {optimizer_lr:.3f}"
+
+        if i < 2:
+            xm.rendezvous(f"after_step_{i}")
 
         if is_master:
             if is_xla:
