@@ -167,5 +167,4 @@ sudo chmod +x /tmp/kill_tpu_jobs.sh
 gcloud compute tpus tpu-vm ssh "$TPU_NAME" --zone="$ZONE" --command 'sudo /tmp/kill_tpu_jobs.sh'
 
 
-
 ```
