@@ -35,6 +35,7 @@ def training_step(
 ):
 
     if is_xla:
+        from torch_xla.core import xla_model as xm
         is_master = xm.is_master_ordinal()  # only one process prints
         device_loader = loader
         pbar = None
@@ -122,6 +123,7 @@ def validation_step(
 ):
 
     if is_xla:
+        from torch_xla.core import xla_model as xm
         is_master = xm.is_master_ordinal()  # only one process prints
         device_loader = loader
         pbar = None
@@ -260,8 +262,6 @@ def fit(
         visualizer = None,
 ):
     if is_xla:
-        from torch_xla.core import xla_model as xm
-        from torch_xla.distributed import parallel_loader as pl
         from .distributed_utils import save_fsdp_model
 
     iterator = tqdm_auto(range(epochs), dynamic_ncols=True)
