@@ -41,7 +41,7 @@ class Config:
     ZIP_URL: str = "https://www.dropbox.com/s/k81ljpmzy3fgtx9/Dataset.zip?dl=1"
     CLASSES: tuple = ("__background__", "Reg-plate")
 
-    BATCH_SIZE: int = 16
+    BATCH_SIZE: int = 128
 
     # Number of workers to use for training
     NUM_WORKERS: int = 1 #4

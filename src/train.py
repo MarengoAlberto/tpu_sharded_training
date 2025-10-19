@@ -52,7 +52,7 @@ def training_step(
         print("Running on non-TPU device.")
         is_master = True
         device_loader = tqdm(loader, dynamic_ncols=True)
-    print(f'base_total: {_base_loader_len(device_loader)}')
+
     model.train()
 
     # iterator = tqdm(loader, dynamic_ncols=True)
