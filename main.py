@@ -68,9 +68,9 @@ def build_datasets(cfg, rank, world_size, device):
         batch_size=local_batch_size,
         sampler=train_sampler,
         drop_last=True,
-        num_workers=NUM_WORKERS,
+        num_workers=0,
         pin_memory=False,
-        persistent_workers=True,
+        persistent_workers=False,
         collate_fn=train_dataset.collate_fn,
     )
 
@@ -86,9 +86,9 @@ def build_datasets(cfg, rank, world_size, device):
         batch_size=local_batch_size,
         sampler=val_sampler,
         drop_last=True,
-        num_workers=NUM_WORKERS,
+        num_workers=0,
         pin_memory=False,
-        persistent_workers=True,
+        persistent_workers=False,
         collate_fn=val_dataset.collate_fn,
     )
     if is_xla:

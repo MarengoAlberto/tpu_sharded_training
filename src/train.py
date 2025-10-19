@@ -24,6 +24,9 @@ def set_sampler_epoch(loader, epoch):
     if sampler is not None and hasattr(sampler, "set_epoch"):
         sampler.set_epoch(epoch)
 
+def _probe(msg, xm):
+    print(f"[rank {xm.get_local_ordinal()}] {msg}", flush=True)
+
 
 def training_step(
         model,
@@ -57,14 +60,21 @@ def training_step(
     loc_loss_avg = []
     total_loss_avg = []
 
+    base_total = len(getattr(device_loader, "loader", device_loader))
+    print(f"[rank {xm.get_local_ordinal()}] train local steps = {base_total}", flush=True)
+
     for i, batch_sample in enumerate(device_loader):
 
         if i == 0 and is_xla:
             try:
                 rank = xm.get_local_ordinal()
+
             except Exception:
                 rank = -1
             print(f"[rank {rank}] reached first batch — compiling...", flush=True)
+
+        if i < 2:
+            _probe(f"got batch {i}", xm)
 
         optimizer.zero_grad()
         if is_xla:
@@ -86,6 +96,7 @@ def training_step(
 
         if is_xla:
             xm.mark_step()
+            _probe("marked step after forward", xm)
 
         total_loss.backward()
 
