@@ -1,15 +1,22 @@
 import os
-import copy
 import numpy as np
 import torch
 from tqdm.auto import tqdm as tqdm_auto
 
+using_xla = False
 try:
     from torch_xla.core import xla_model as xm
     from torch_xla.distributed import parallel_loader as pl
     from .distributed_utils import save_fsdp_model
+    using_xla = True
 except ImportError:
     pass
+
+
+def _base_loader_len(loader):
+    # If wrapped by MpDeviceLoader, the real DataLoader is in .loader
+    base = getattr(loader, "loader", loader)
+    return len(base)
 
 
 def training_step(
@@ -22,14 +29,15 @@ def training_step(
         prefix="",
 ):
 
-    try:
-        device_loader = loader
+    if using_xla:
         is_master = xm.is_master_ordinal()  # only one process prints
+        device_loader = loader
         pbar = None
         if is_master:
             from tqdm import tqdm
-            pbar = tqdm(total=len(loader), desc=f"[{prefix}] Train")
-    except:
+            base_total = _base_loader_len(loader)
+            pbar = tqdm(total=base_total, desc=f"[{prefix}] Train")
+    else:
         from tqdm.auto import tqdm
         print("Running on non-TPU device.")
         is_master = True
@@ -47,9 +55,14 @@ def training_step(
 
     for i, batch_sample in enumerate(device_loader):
         optimizer.zero_grad()
-        image_batch = torch.stack(batch_sample[0]).to(device)
-        box_targets = torch.stack(batch_sample[3]).to(device)
-        cls_targets = torch.stack(batch_sample[4]).to(device)
+        if using_xla:
+            image_batch = torch.stack(batch_sample[0])
+            box_targets = torch.stack(batch_sample[3])
+            cls_targets = torch.stack(batch_sample[4])
+        else:
+            image_batch = torch.stack(batch_sample[0]).to(device)
+            box_targets = torch.stack(batch_sample[3]).to(device)
+            cls_targets = torch.stack(batch_sample[4]).to(device)
 
         pred_boxes, pred_labels = model(image_batch)
 
@@ -58,11 +71,11 @@ def training_step(
         total_loss = loss_weights["loc_wt"]*loc_loss + loss_weights["cls_wt"]*cls_loss
         total_loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        try:
+        if using_xla:
             xm.optimizer_step(optimizer)
             optimizer.zero_grad(set_to_none=True)
             xm.mark_step()
-        except:
+        else:
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
 
@@ -77,17 +90,15 @@ def training_step(
         status+= f"LR: {optimizer_lr:.3f}"
 
         if is_master:
-            try:
+            if using_xla:
                 pbar.update(1)
                 pbar.set_postfix_str(status)
-            except:
+            else:
                 device_loader.set_description(status)
 
     if is_master:
-        try:
+        if using_xla:
             pbar.close()
-        except:
-            pass
 
     return {"loc_loss": np.mean(loc_loss_avg), "cls_loss": np.mean(cls_loss_avg), "total_loss": np.mean(total_loss_avg)}
 
@@ -107,14 +118,15 @@ def validation_step(
         prefix="",
 ):
 
-    try:
-        device_loader = loader
+    if using_xla:
         is_master = xm.is_master_ordinal()  # only one process prints
+        device_loader = loader
         pbar = None
         if is_master:
             from tqdm import tqdm
-            pbar = tqdm(total=len(loader), desc=f"[{prefix}] Train")
-    except:
+            base_total = _base_loader_len(loader)
+            pbar = tqdm(total=base_total, desc=f"[{prefix}] Train")
+    else:
         from tqdm.auto import tqdm
         print("Running on non-TPU device.")
         is_master = True
@@ -133,9 +145,14 @@ def validation_step(
 
     for i, batch_sample in enumerate(device_loader):
 
-        image_batch = torch.stack(batch_sample[0]).to(device)
-        box_targets = torch.stack(batch_sample[3]).to(device)
-        cls_targets = torch.stack(batch_sample[4]).to(device)
+        if using_xla:
+            image_batch = torch.stack(batch_sample[0])
+            box_targets = torch.stack(batch_sample[3])
+            cls_targets = torch.stack(batch_sample[4])
+        else:
+            image_batch = torch.stack(batch_sample[0]).to(device)
+            box_targets = torch.stack(batch_sample[3]).to(device)
+            cls_targets = torch.stack(batch_sample[4]).to(device)
 
         with torch.no_grad():
             pred_boxes, pred_labels = model(image_batch)
@@ -155,8 +172,12 @@ def validation_step(
 
         for idx, (box_raw, label_raw) in enumerate(zip(batch_sample[1], batch_sample[2])):
 
-            boxes_raw_per_image  = box_raw.to(device)
-            labels_raw_per_image = label_raw.to(device)
+            if using_xla:
+                boxes_raw_per_image  = box_raw
+                labels_raw_per_image = label_raw
+            else:
+                boxes_raw_per_image  = box_raw.to(device)
+                labels_raw_per_image = label_raw.to(device)
 
             prediction_data = encoder.decode(pred_boxes[idx],
                                              pred_labels[idx],
@@ -189,10 +210,10 @@ def validation_step(
         status+= f"Loc Loss: {np.mean(loc_loss_avg):.4f}, Cls Loss: {np.mean(cls_loss_avg):.4f}, "
 
         if is_master:
-            try:
+            if using_xla:
                 pbar.update(1)
                 pbar.set_postfix_str(status)
-            except:
+            else:
                 device_loader.set_description(status)
 
 
@@ -202,17 +223,15 @@ def validation_step(
     status+= f"val_mAP@50: {map_50:.3f}"
 
     if is_master:
-        try:
+        if using_xla:
             pbar.update(1)
             pbar.set_postfix_str(status)
-        except:
+        else:
             device_loader.set_description(status)
 
     if is_master:
-        try:
+        if using_xla:
             pbar.close()
-        except:
-            pass
 
     output = {"loc_loss": np.mean(loc_loss_avg), "cls_loss": np.mean(cls_loss_avg), "total_loss":np.mean(total_loss_avg),
               "metrics": metrics_dict}
