@@ -270,7 +270,7 @@ def run(args):
     if not is_xla:
         main_worker(0, args)
     else:
-        xmp.spawn(main_worker, args=(args,), nprocs=None)
+        xmp.spawn(main_worker, args=(args,), nprocs=8)
 
 
 if __name__ == "__main__":
